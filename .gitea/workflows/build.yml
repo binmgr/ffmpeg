@@ -1,0 +1,208 @@
+name: Build FFmpeg Static Binaries
+
+on:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+    inputs:
+      ffmpeg_version:
+        description: 'FFmpeg version (empty for latest)'
+        required: false
+        default: ''
+
+jobs:
+  get-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Get FFmpeg Version
+        id: version
+        run: |
+          if [ -n "${{ inputs.ffmpeg_version }}" ]; then
+            VERSION="${{ inputs.ffmpeg_version }}"
+          else
+            VERSION=$(curl -s https://ffmpeg.org/releases/ | grep -oP 'ffmpeg-\K[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V | tail -1)
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+
+  build:
+    needs: get-version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: amd64, target_os: linux, ext: "" }
+          - { os: linux, arch: arm64, target_os: linux, ext: "" }
+          - { os: windows, arch: amd64, target_os: mingw32, ext: ".exe" }
+          - { os: windows, arch: arm64, target_os: mingw32, ext: ".exe" }
+          - { os: darwin, arch: amd64, target_os: darwin, ext: "" }
+          - { os: darwin, arch: arm64, target_os: darwin, ext: "" }
+          - { os: freebsd, arch: amd64, target_os: freebsd, ext: "" }
+          - { os: freebsd, arch: arm64, target_os: freebsd, ext: "" }
+    steps:
+      - name: Setup and Build
+        env:
+          FFMPEG_VERSION: ${{ needs.get-version.outputs.version }}
+          SERVER_URL: ${{ gitea.server_url || github.server_url }}
+          REPOSITORY: ${{ gitea.repository || github.repository }}
+          REPO_OWNER: ${{ gitea.repository_owner || github.repository_owner }}
+          COMMIT_SHA: ${{ gitea.sha || github.sha }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config nasm yasm git curl wget autoconf automake libtool texinfo zlib1g-dev libssl-dev xz-utils
+
+          # Install cross compiler
+          case "${{ matrix.os }}-${{ matrix.arch }}" in
+            linux-amd64)
+              wget -q https://musl.cc/x86_64-linux-musl-cross.tgz && tar xzf x86_64-linux-musl-cross.tgz
+              export PATH="$PWD/x86_64-linux-musl-cross/bin:$PATH"
+              export CC=x86_64-linux-musl-gcc CXX=x86_64-linux-musl-g++ CROSS_PREFIX=x86_64-linux-musl-
+              ;;
+            linux-arm64)
+              wget -q https://musl.cc/aarch64-linux-musl-cross.tgz && tar xzf aarch64-linux-musl-cross.tgz
+              export PATH="$PWD/aarch64-linux-musl-cross/bin:$PATH"
+              export CC=aarch64-linux-musl-gcc CXX=aarch64-linux-musl-g++ CROSS_PREFIX=aarch64-linux-musl-
+              ;;
+            windows-amd64)
+              sudo apt-get install -y mingw-w64
+              export CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CROSS_PREFIX=x86_64-w64-mingw32-
+              ;;
+            windows-arm64)
+              wget -q https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
+              tar xJf llvm-mingw-*.tar.xz && export PATH="$PWD/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64/bin:$PATH"
+              export CC=aarch64-w64-mingw32-gcc CXX=aarch64-w64-mingw32-g++ CROSS_PREFIX=aarch64-w64-mingw32-
+              ;;
+            darwin-amd64)
+              sudo apt-get install -y clang libxml2-dev llvm-dev uuid-dev
+              git clone --depth 1 https://github.com/tpoechtrager/osxcross.git && cd osxcross
+              wget -q https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
+              UNATTENDED=1 ./build.sh || true && export PATH="$PWD/target/bin:$PATH" && cd ..
+              export CC=x86_64-apple-darwin23-clang CXX=x86_64-apple-darwin23-clang++ CROSS_PREFIX=x86_64-apple-darwin23-
+              ;;
+            darwin-arm64)
+              sudo apt-get install -y clang libxml2-dev llvm-dev uuid-dev
+              git clone --depth 1 https://github.com/tpoechtrager/osxcross.git && cd osxcross
+              wget -q https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
+              UNATTENDED=1 ./build.sh || true && export PATH="$PWD/target/bin:$PATH" && cd ..
+              export CC=aarch64-apple-darwin23-clang CXX=aarch64-apple-darwin23-clang++ CROSS_PREFIX=aarch64-apple-darwin23-
+              ;;
+            freebsd-*)
+              sudo apt-get install -y clang lld
+              wget -q https://download.freebsd.org/releases/amd64/14.0-RELEASE/base.txz
+              sudo mkdir -p /opt/freebsd && sudo tar xJf base.txz -C /opt/freebsd ./lib ./usr/lib ./usr/include
+              export CC=clang CXX=clang++ CROSS_PREFIX= FREEBSD_SYSROOT=/opt/freebsd
+              ;;
+          esac
+
+          # Download and build FFmpeg
+          wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
+          tar xJf ffmpeg-*.tar.xz && cd ffmpeg-*
+
+          EXTRA_FLAGS=""
+          [ -n "${FREEBSD_SYSROOT}" ] && EXTRA_FLAGS="--sysroot=${FREEBSD_SYSROOT}"
+
+          ./configure \
+            --prefix=$PWD/../output \
+            --enable-gpl --enable-version3 --enable-nonfree \
+            --enable-static --disable-shared --disable-debug --disable-doc --disable-ffplay \
+            --pkg-config-flags=--static \
+            --enable-cross-compile --cross-prefix=${CROSS_PREFIX} \
+            --arch=${{ matrix.arch }} --target-os=${{ matrix.target_os }} \
+            --extra-ldflags=-static ${EXTRA_FLAGS} || cat ffbuild/config.log
+
+          make -j$(nproc) && make install && cd ..
+
+          # Strip and rename
+          ${CROSS_PREFIX}strip output/bin/ffmpeg${{ matrix.ext }} 2>/dev/null || strip output/bin/ffmpeg${{ matrix.ext }} 2>/dev/null || true
+          mv output/bin/ffmpeg${{ matrix.ext }} ffmpeg-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+
+          # Metadata
+          cat > ffmpeg-${{ matrix.os }}-${{ matrix.arch }}.json << EOF
+          {
+            "org.opencontainers.image.title": "FFmpeg Static Build",
+            "org.opencontainers.image.version": "${FFMPEG_VERSION}",
+            "org.opencontainers.image.os": "${{ matrix.os }}",
+            "org.opencontainers.image.architecture": "${{ matrix.arch }}",
+            "org.opencontainers.image.created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "org.opencontainers.image.source": "${SERVER_URL}/${REPOSITORY}",
+            "org.opencontainers.image.revision": "${COMMIT_SHA}",
+            "org.opencontainers.image.vendor": "${REPO_OWNER}",
+            "org.opencontainers.image.licenses": "GPL-2.0-or-later",
+            "build.static": "true", "build.musl": "true", "build.stripped": "true"
+          }
+          EOF
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            ffmpeg-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+            ffmpeg-${{ matrix.os }}-${{ matrix.arch }}.json
+          retention-days: 1
+
+  release:
+    needs: [get-version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SERVER_URL: ${{ gitea.server_url || github.server_url }}
+          REPOSITORY: ${{ gitea.repository || github.repository }}
+          TAG: ${{ needs.get-version.outputs.tag }}
+          VERSION: ${{ needs.get-version.outputs.version }}
+        run: |
+          mkdir -p release
+          mv artifacts/* release/ 2>/dev/null || mv artifacts/*/* release/
+          cd release
+          chmod +x ffmpeg-linux-* ffmpeg-darwin-* ffmpeg-freebsd-* 2>/dev/null || true
+          sha256sum ffmpeg-* > checksums.txt
+
+          # Combined metadata
+          echo "[" > metadata.json
+          first=true
+          for f in *.json; do
+            [ "$f" = "metadata.json" ] && continue
+            [ "$first" = true ] && first=false || echo "," >> metadata.json
+            cat "$f" >> metadata.json
+          done
+          echo "]" >> metadata.json
+
+          RELEASE_BODY="FFmpeg ${VERSION} static builds for Linux, Windows, macOS, FreeBSD (amd64/arm64)"
+
+          if [ -n "${GITEA_TOKEN}" ]; then
+            # Gitea API
+            curl -sf -X DELETE -H "Authorization: token ${GITEA_TOKEN}" \
+              "${SERVER_URL}/api/v1/repos/${REPOSITORY}/releases/tags/${TAG}" || true
+
+            RELEASE_ID=$(curl -sf -X POST -H "Authorization: token ${GITEA_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "${SERVER_URL}/api/v1/repos/${REPOSITORY}/releases" \
+              -d "{\"tag_name\":\"${TAG}\",\"name\":\"FFmpeg ${VERSION}\",\"body\":\"${RELEASE_BODY}\"}" \
+              | jq -r '.id')
+
+            for file in *; do
+              [ -f "$file" ] || continue
+              curl -sf -X POST -H "Authorization: token ${GITEA_TOKEN}" \
+                -F "attachment=@${file}" \
+                "${SERVER_URL}/api/v1/repos/${REPOSITORY}/releases/${RELEASE_ID}/assets?name=${file}"
+            done
+          else
+            # GitHub CLI
+            gh release delete "${TAG}" --repo "${REPOSITORY}" --yes --cleanup-tag 2>/dev/null || true
+            gh release create "${TAG}" --repo "${REPOSITORY}" --title "FFmpeg ${VERSION}" --notes "${RELEASE_BODY}" *
+          fi

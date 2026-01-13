@@ -1,0 +1,247 @@
+name: Build FFmpeg Static Binaries
+
+on:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+    inputs:
+      ffmpeg_version:
+        description: 'FFmpeg version (empty for latest)'
+        required: false
+        default: ''
+
+jobs:
+  get-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Get FFmpeg Version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.ffmpeg_version }}" ]; then
+            VERSION="${{ github.event.inputs.ffmpeg_version }}"
+          else
+            VERSION=$(curl -s https://ffmpeg.org/releases/ | grep -oP 'ffmpeg-\K[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V | tail -1)
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+
+  build:
+    needs: get-version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: amd64, cross: x86_64-linux-musl, target_os: linux, ext: "" }
+          - { os: linux, arch: arm64, cross: aarch64-linux-musl, target_os: linux, ext: "" }
+          - { os: windows, arch: amd64, cross: x86_64-w64-mingw32, target_os: mingw32, ext: ".exe" }
+          - { os: windows, arch: arm64, cross: aarch64-w64-mingw32, target_os: mingw32, ext: ".exe" }
+          - { os: darwin, arch: amd64, cross: x86_64-apple-darwin23, target_os: darwin, ext: "" }
+          - { os: darwin, arch: arm64, cross: aarch64-apple-darwin23, target_os: darwin, ext: "" }
+          - { os: freebsd, arch: amd64, cross: x86_64-unknown-freebsd14, target_os: freebsd, ext: "" }
+          - { os: freebsd, arch: arm64, cross: aarch64-unknown-freebsd14, target_os: freebsd, ext: "" }
+    steps:
+      - name: Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config nasm yasm git curl wget autoconf automake libtool texinfo zlib1g-dev libssl-dev xz-utils
+
+      - name: Install Cross Compiler
+        run: |
+          case "${{ matrix.os }}-${{ matrix.arch }}" in
+            linux-amd64)
+              wget -q https://musl.cc/x86_64-linux-musl-cross.tgz
+              tar xzf x86_64-linux-musl-cross.tgz
+              echo "$PWD/x86_64-linux-musl-cross/bin" >> $GITHUB_PATH
+              echo "CC=x86_64-linux-musl-gcc" >> $GITHUB_ENV
+              echo "CXX=x86_64-linux-musl-g++" >> $GITHUB_ENV
+              echo "CROSS_PREFIX=x86_64-linux-musl-" >> $GITHUB_ENV
+              ;;
+            linux-arm64)
+              wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
+              tar xzf aarch64-linux-musl-cross.tgz
+              echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+              echo "CC=aarch64-linux-musl-gcc" >> $GITHUB_ENV
+              echo "CXX=aarch64-linux-musl-g++" >> $GITHUB_ENV
+              echo "CROSS_PREFIX=aarch64-linux-musl-" >> $GITHUB_ENV
+              ;;
+            windows-amd64)
+              sudo apt-get install -y mingw-w64
+              echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
+              echo "CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
+              echo "CROSS_PREFIX=x86_64-w64-mingw32-" >> $GITHUB_ENV
+              ;;
+            windows-arm64)
+              wget -q https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
+              tar xJf llvm-mingw-*.tar.xz
+              echo "$PWD/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64/bin" >> $GITHUB_PATH
+              echo "CC=aarch64-w64-mingw32-gcc" >> $GITHUB_ENV
+              echo "CXX=aarch64-w64-mingw32-g++" >> $GITHUB_ENV
+              echo "CROSS_PREFIX=aarch64-w64-mingw32-" >> $GITHUB_ENV
+              ;;
+            darwin-amd64|darwin-arm64)
+              sudo apt-get install -y clang libxml2-dev llvm-dev uuid-dev libssl-dev
+              git clone --depth 1 https://github.com/tpoechtrager/osxcross.git
+              cd osxcross
+              wget -q https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
+              UNATTENDED=1 ./build.sh || true
+              echo "$PWD/target/bin" >> $GITHUB_PATH
+              cd ..
+              if [ "${{ matrix.arch }}" = "amd64" ]; then
+                echo "CC=x86_64-apple-darwin23-clang" >> $GITHUB_ENV
+                echo "CXX=x86_64-apple-darwin23-clang++" >> $GITHUB_ENV
+                echo "CROSS_PREFIX=x86_64-apple-darwin23-" >> $GITHUB_ENV
+              else
+                echo "CC=aarch64-apple-darwin23-clang" >> $GITHUB_ENV
+                echo "CXX=aarch64-apple-darwin23-clang++" >> $GITHUB_ENV
+                echo "CROSS_PREFIX=aarch64-apple-darwin23-" >> $GITHUB_ENV
+              fi
+              ;;
+            freebsd-*)
+              sudo apt-get install -y clang lld
+              # Download FreeBSD base for headers/libs
+              wget -q https://download.freebsd.org/releases/amd64/14.0-RELEASE/base.txz
+              mkdir -p /opt/freebsd
+              sudo tar xJf base.txz -C /opt/freebsd ./lib ./usr/lib ./usr/include
+              echo "CC=clang" >> $GITHUB_ENV
+              echo "CXX=clang++" >> $GITHUB_ENV
+              echo "CROSS_PREFIX=" >> $GITHUB_ENV
+              echo "FREEBSD_SYSROOT=/opt/freebsd" >> $GITHUB_ENV
+              ;;
+          esac
+
+      - name: Download FFmpeg
+        run: |
+          wget -q "https://ffmpeg.org/releases/ffmpeg-${{ needs.get-version.outputs.version }}.tar.xz"
+          tar xJf ffmpeg-*.tar.xz
+          mv ffmpeg-* ffmpeg-src
+
+      - name: Build FFmpeg
+        run: |
+          cd ffmpeg-src
+          mkdir -p ../output
+
+          CONFIGURE_FLAGS="
+            --prefix=$PWD/../output
+            --enable-gpl
+            --enable-version3
+            --enable-nonfree
+            --enable-static
+            --disable-shared
+            --disable-debug
+            --disable-doc
+            --disable-ffplay
+            --pkg-config-flags=--static
+            --enable-cross-compile
+            --cross-prefix=${CROSS_PREFIX}
+            --arch=${{ matrix.arch }}
+            --target-os=${{ matrix.target_os }}
+            --extra-ldflags=-static
+          "
+
+          if [ "${{ matrix.os }}" = "freebsd" ]; then
+            CONFIGURE_FLAGS="${CONFIGURE_FLAGS} --sysroot=${FREEBSD_SYSROOT}"
+          fi
+
+          ./configure ${CONFIGURE_FLAGS} || { cat ffbuild/config.log; exit 1; }
+          make -j$(nproc)
+          make install
+
+      - name: Strip Binary
+        run: |
+          BINARY="output/bin/ffmpeg${{ matrix.ext }}"
+          ${CROSS_PREFIX}strip "${BINARY}" 2>/dev/null || strip "${BINARY}" 2>/dev/null || true
+          mv "${BINARY}" "ffmpeg-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+
+      - name: Generate Metadata
+        run: |
+          cat > "ffmpeg-${{ matrix.os }}-${{ matrix.arch }}.json" << 'EOF'
+          {
+            "org.opencontainers.image.title": "FFmpeg Static Build",
+            "org.opencontainers.image.description": "Statically compiled FFmpeg binary",
+            "org.opencontainers.image.version": "${{ needs.get-version.outputs.version }}",
+            "org.opencontainers.image.os": "${{ matrix.os }}",
+            "org.opencontainers.image.architecture": "${{ matrix.arch }}",
+            "org.opencontainers.image.created": "${{ github.event.head_commit.timestamp }}",
+            "org.opencontainers.image.source": "${{ github.server_url }}/${{ github.repository }}",
+            "org.opencontainers.image.revision": "${{ github.sha }}",
+            "org.opencontainers.image.vendor": "${{ github.repository_owner }}",
+            "org.opencontainers.image.licenses": "GPL-2.0-or-later",
+            "build.target": "${{ matrix.cross }}",
+            "build.static": "true",
+            "build.musl": "true",
+            "build.stripped": "true"
+          }
+          EOF
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            ffmpeg-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+            ffmpeg-${{ matrix.os }}-${{ matrix.arch }}.json
+          retention-days: 1
+
+  release:
+    needs: [get-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Prepare Release
+        run: |
+          mkdir -p release
+          mv artifacts/* release/ 2>/dev/null || mv artifacts/*/* release/
+          cd release
+          chmod +x ffmpeg-linux-* ffmpeg-darwin-* ffmpeg-freebsd-* 2>/dev/null || true
+          sha256sum ffmpeg-* > checksums.txt
+
+          # Combined metadata
+          echo "[" > metadata.json
+          first=true
+          for f in *.json; do
+            [ "$f" = "metadata.json" ] && continue
+            [ "$first" = true ] && first=false || echo "," >> metadata.json
+            cat "$f" >> metadata.json
+          done
+          echo "]" >> metadata.json
+
+      - name: Delete Existing Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete "${{ needs.get-version.outputs.tag }}" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ needs.get-version.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --title "FFmpeg ${{ needs.get-version.outputs.version }}" \
+            --notes "## FFmpeg ${{ needs.get-version.outputs.version }} Static Builds
+
+          Fully static, multi-platform FFmpeg binaries with all features enabled.
+
+          | Platform | AMD64 | ARM64 |
+          |----------|-------|-------|
+          | Linux | \`ffmpeg-linux-amd64\` | \`ffmpeg-linux-arm64\` |
+          | Windows | \`ffmpeg-windows-amd64.exe\` | \`ffmpeg-windows-arm64.exe\` |
+          | macOS | \`ffmpeg-darwin-amd64\` | \`ffmpeg-darwin-arm64\` |
+          | FreeBSD | \`ffmpeg-freebsd-amd64\` | \`ffmpeg-freebsd-arm64\` |
+
+          **Build**: Static (musl) | Stripped | GPL v2+
+
+          Verify: \`sha256sum -c checksums.txt\`" \
+            release/*

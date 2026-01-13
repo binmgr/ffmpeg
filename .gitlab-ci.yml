@@ -1,0 +1,215 @@
+variables:
+  GIT_DEPTH: 1
+
+stages:
+  - version
+  - build
+  - release
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+get-version:
+  stage: version
+  image: alpine:latest
+  script:
+    - apk add --no-cache curl
+    - |
+      if [ -n "${FFMPEG_VERSION_OVERRIDE}" ]; then
+        VERSION="${FFMPEG_VERSION_OVERRIDE}"
+      else
+        VERSION=$(curl -s https://ffmpeg.org/releases/ | grep -oP 'ffmpeg-\K[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V | tail -1)
+      fi
+      echo "FFMPEG_VERSION=${VERSION}" > version.env
+      echo "FFMPEG_TAG=v${VERSION}" >> version.env
+  artifacts:
+    reports:
+      dotenv: version.env
+
+.build:
+  stage: build
+  image: ubuntu:22.04
+  needs: [get-version]
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+  script:
+    - |
+      apt-get update
+      apt-get install -y build-essential cmake pkg-config nasm yasm git curl wget autoconf automake libtool texinfo zlib1g-dev libssl-dev xz-utils
+
+      # Install cross compiler
+      case "${TARGET_OS}-${TARGET_ARCH}" in
+        linux-amd64)
+          wget -q https://musl.cc/x86_64-linux-musl-cross.tgz && tar xzf x86_64-linux-musl-cross.tgz
+          export PATH="$PWD/x86_64-linux-musl-cross/bin:$PATH"
+          export CC=x86_64-linux-musl-gcc CXX=x86_64-linux-musl-g++ CROSS_PREFIX=x86_64-linux-musl-
+          ;;
+        linux-arm64)
+          wget -q https://musl.cc/aarch64-linux-musl-cross.tgz && tar xzf aarch64-linux-musl-cross.tgz
+          export PATH="$PWD/aarch64-linux-musl-cross/bin:$PATH"
+          export CC=aarch64-linux-musl-gcc CXX=aarch64-linux-musl-g++ CROSS_PREFIX=aarch64-linux-musl-
+          ;;
+        windows-amd64)
+          apt-get install -y mingw-w64
+          export CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CROSS_PREFIX=x86_64-w64-mingw32-
+          ;;
+        windows-arm64)
+          wget -q https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
+          tar xJf llvm-mingw-*.tar.xz && export PATH="$PWD/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64/bin:$PATH"
+          export CC=aarch64-w64-mingw32-gcc CXX=aarch64-w64-mingw32-g++ CROSS_PREFIX=aarch64-w64-mingw32-
+          ;;
+        darwin-amd64)
+          apt-get install -y clang libxml2-dev llvm-dev uuid-dev
+          git clone --depth 1 https://github.com/tpoechtrager/osxcross.git && cd osxcross
+          wget -q https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
+          UNATTENDED=1 ./build.sh || true && export PATH="$PWD/target/bin:$PATH" && cd ..
+          export CC=x86_64-apple-darwin23-clang CXX=x86_64-apple-darwin23-clang++ CROSS_PREFIX=x86_64-apple-darwin23-
+          ;;
+        darwin-arm64)
+          apt-get install -y clang libxml2-dev llvm-dev uuid-dev
+          git clone --depth 1 https://github.com/tpoechtrager/osxcross.git && cd osxcross
+          wget -q https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
+          UNATTENDED=1 ./build.sh || true && export PATH="$PWD/target/bin:$PATH" && cd ..
+          export CC=aarch64-apple-darwin23-clang CXX=aarch64-apple-darwin23-clang++ CROSS_PREFIX=aarch64-apple-darwin23-
+          ;;
+        freebsd-*)
+          apt-get install -y clang lld
+          wget -q https://download.freebsd.org/releases/amd64/14.0-RELEASE/base.txz
+          mkdir -p /opt/freebsd && tar xJf base.txz -C /opt/freebsd ./lib ./usr/lib ./usr/include
+          export CC=clang CXX=clang++ CROSS_PREFIX= FREEBSD_SYSROOT=/opt/freebsd
+          ;;
+      esac
+
+      # Download and build FFmpeg
+      wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
+      tar xJf ffmpeg-*.tar.xz && cd ffmpeg-*
+
+      EXTRA_FLAGS=""
+      [ -n "${FREEBSD_SYSROOT}" ] && EXTRA_FLAGS="--sysroot=${FREEBSD_SYSROOT}"
+
+      ./configure \
+        --prefix=$PWD/../output \
+        --enable-gpl --enable-version3 --enable-nonfree \
+        --enable-static --disable-shared --disable-debug --disable-doc --disable-ffplay \
+        --pkg-config-flags=--static \
+        --enable-cross-compile --cross-prefix=${CROSS_PREFIX} \
+        --arch=${TARGET_ARCH} --target-os=${TARGET_OS_FLAG} \
+        --extra-ldflags=-static ${EXTRA_FLAGS} || cat ffbuild/config.log
+
+      make -j$(nproc) && make install && cd ..
+
+      # Strip and rename
+      ${CROSS_PREFIX}strip output/bin/ffmpeg${BINARY_EXT} 2>/dev/null || strip output/bin/ffmpeg${BINARY_EXT} 2>/dev/null || true
+      mkdir -p artifacts
+      mv output/bin/ffmpeg${BINARY_EXT} artifacts/ffmpeg-${TARGET_OS}-${TARGET_ARCH}${BINARY_EXT}
+
+      # Metadata
+      cat > artifacts/ffmpeg-${TARGET_OS}-${TARGET_ARCH}.json << EOF
+      {
+        "org.opencontainers.image.title": "FFmpeg Static Build",
+        "org.opencontainers.image.version": "${FFMPEG_VERSION}",
+        "org.opencontainers.image.os": "${TARGET_OS}",
+        "org.opencontainers.image.architecture": "${TARGET_ARCH}",
+        "org.opencontainers.image.created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+        "org.opencontainers.image.source": "${CI_SERVER_URL}/${CI_PROJECT_PATH}",
+        "org.opencontainers.image.revision": "${CI_COMMIT_SHA}",
+        "org.opencontainers.image.vendor": "${CI_PROJECT_NAMESPACE}",
+        "org.opencontainers.image.licenses": "GPL-2.0-or-later",
+        "build.static": "true", "build.musl": "true", "build.stripped": "true"
+      }
+      EOF
+  artifacts:
+    paths: [artifacts/]
+    expire_in: 1 day
+
+build-linux-amd64:
+  extends: .build
+  variables: { TARGET_OS: linux, TARGET_ARCH: amd64, TARGET_OS_FLAG: linux, BINARY_EXT: "" }
+
+build-linux-arm64:
+  extends: .build
+  variables: { TARGET_OS: linux, TARGET_ARCH: arm64, TARGET_OS_FLAG: linux, BINARY_EXT: "" }
+
+build-windows-amd64:
+  extends: .build
+  variables: { TARGET_OS: windows, TARGET_ARCH: amd64, TARGET_OS_FLAG: mingw32, BINARY_EXT: ".exe" }
+
+build-windows-arm64:
+  extends: .build
+  variables: { TARGET_OS: windows, TARGET_ARCH: arm64, TARGET_OS_FLAG: mingw32, BINARY_EXT: ".exe" }
+
+build-darwin-amd64:
+  extends: .build
+  variables: { TARGET_OS: darwin, TARGET_ARCH: amd64, TARGET_OS_FLAG: darwin, BINARY_EXT: "" }
+
+build-darwin-arm64:
+  extends: .build
+  variables: { TARGET_OS: darwin, TARGET_ARCH: arm64, TARGET_OS_FLAG: darwin, BINARY_EXT: "" }
+
+build-freebsd-amd64:
+  extends: .build
+  variables: { TARGET_OS: freebsd, TARGET_ARCH: amd64, TARGET_OS_FLAG: freebsd, BINARY_EXT: "" }
+
+build-freebsd-arm64:
+  extends: .build
+  variables: { TARGET_OS: freebsd, TARGET_ARCH: arm64, TARGET_OS_FLAG: freebsd, BINARY_EXT: "" }
+
+release:
+  stage: release
+  image: alpine:latest
+  needs:
+    - get-version
+    - build-linux-amd64
+    - build-linux-arm64
+    - build-windows-amd64
+    - build-windows-arm64
+    - build-darwin-amd64
+    - build-darwin-arm64
+    - build-freebsd-amd64
+    - build-freebsd-arm64
+  script:
+    - apk add --no-cache curl jq coreutils
+    - |
+      cd artifacts
+      chmod +x ffmpeg-linux-* ffmpeg-darwin-* ffmpeg-freebsd-* 2>/dev/null || true
+      sha256sum ffmpeg-* > checksums.txt
+
+      # Combined metadata
+      echo "[" > metadata.json
+      first=true
+      for f in *.json; do
+        [ "$f" = "metadata.json" ] && continue
+        [ "$first" = true ] && first=false || echo "," >> metadata.json
+        cat "$f" >> metadata.json
+      done
+      echo "]" >> metadata.json
+
+      # Delete existing release
+      curl -sf -X DELETE -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${FFMPEG_TAG}" || true
+      curl -sf -X DELETE -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/tags/${FFMPEG_TAG}" || true
+
+      # Create tag and release
+      curl -sf -X POST -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/tags" \
+        -d "tag_name=${FFMPEG_TAG}&ref=${CI_COMMIT_SHA}" || true
+
+      RELEASE_ID=$(curl -sf -X POST -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+        -H "Content-Type: application/json" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases" \
+        -d "{\"tag_name\":\"${FFMPEG_TAG}\",\"name\":\"FFmpeg ${FFMPEG_VERSION}\",\"description\":\"FFmpeg ${FFMPEG_VERSION} static builds\"}" \
+        | jq -r '.tag_name')
+
+      # Upload assets
+      for file in ffmpeg-* checksums.txt metadata.json; do
+        [ -f "$file" ] || continue
+        UPLOAD=$(curl -sf -X POST -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+          -F "file=@${file}" "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/uploads" | jq -r '.full_path')
+        curl -sf -X POST -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${FFMPEG_TAG}/assets/links" \
+          -d "name=${file}&url=${CI_SERVER_URL}/${CI_PROJECT_PATH}${UPLOAD}"
+      done
