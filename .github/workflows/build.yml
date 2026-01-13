@@ -15,14 +15,11 @@ on:
 jobs:
   get-version:
     runs-on: ubuntu-latest
-    container: alpine:latest
+    container: ghcr.io/binmgr/ffmpeg/build-env:latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
-      - name: Install Dependencies
-        run: apk add --no-cache curl grep coreutils wget
-
       - name: Get FFmpeg Version
         id: version
         run: |
@@ -49,7 +46,7 @@ jobs:
   build:
     needs: get-version
     runs-on: ubuntu-latest
-    container: alpine:latest
+    container: ghcr.io/binmgr/ffmpeg/build-env:latest
     strategy:
       fail-fast: false
       matrix:
@@ -59,31 +56,9 @@ jobs:
           - { os: windows, arch: amd64, cross: x86_64-w64-mingw32, target_os: mingw32, ext: ".exe" }
           - { os: windows, arch: arm64, cross: aarch64-w64-mingw32, target_os: mingw32, ext: ".exe" }
     steps:
-      - name: Setup Environment
+      - name: Configure Cross Compiler
         run: |
-          # Install base build tools (Alpine uses musl libc by default)
-          apk add --no-cache \
-            build-base \
-            cmake \
-            pkgconf \
-            nasm \
-            yasm \
-            git \
-            curl \
-            wget \
-            autoconf \
-            automake \
-            libtool \
-            texinfo \
-            zlib-dev \
-            zlib-static \
-            openssl-dev \
-            openssl-libs-static \
-            linux-headers \
-            xz
-
-      - name: Install Cross Compiler
-        run: |
+          # All toolchains are pre-installed in the custom Docker image
           case "${{ matrix.os }}-${{ matrix.arch }}" in
             linux-amd64)
               # Native musl build on x86_64
@@ -92,27 +67,19 @@ jobs:
               echo "CROSS_PREFIX=" >> $GITHUB_ENV
               ;;
             linux-arm64)
-              # Download musl cross-compiler for ARM64
-              wget https://musl.cc/aarch64-linux-musl-cross.tgz
-              tar xzf aarch64-linux-musl-cross.tgz
-              echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+              # Use pre-installed musl cross-compiler for ARM64
               echo "CC=aarch64-linux-musl-gcc" >> $GITHUB_ENV
               echo "CXX=aarch64-linux-musl-g++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=aarch64-linux-musl-" >> $GITHUB_ENV
               ;;
             windows-amd64)
-              apk add --no-cache mingw-w64-gcc
+              # Use pre-installed MinGW
               echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
               echo "CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=x86_64-w64-mingw32-" >> $GITHUB_ENV
               ;;
             windows-arm64)
-              # Install clang for LLVM MinGW
-              apk add --no-cache clang lld
-              # Download LLVM MinGW for ARM64 Windows
-              wget https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
-              tar xJf llvm-mingw-*.tar.xz
-              echo "$PWD/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64/bin" >> $GITHUB_PATH
+              # Use pre-installed LLVM MinGW for ARM64
               echo "CC=aarch64-w64-mingw32-gcc" >> $GITHUB_ENV
               echo "CXX=aarch64-w64-mingw32-g++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=aarch64-w64-mingw32-" >> $GITHUB_ENV
@@ -201,13 +168,10 @@ jobs:
   release:
     needs: [get-version, build]
     runs-on: ubuntu-latest
-    container: alpine:latest
+    container: ghcr.io/binmgr/ffmpeg/build-env:latest
     permissions:
       contents: write
     steps:
-      - name: Install Dependencies
-        run: apk add --no-cache github-cli coreutils bash
-
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
