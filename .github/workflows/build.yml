@@ -125,17 +125,30 @@ jobs:
         run: |
           BINARY="output/bin/ffmpeg${{ matrix.ext }}"
           ${CROSS_PREFIX}strip "${BINARY}" 2>/dev/null || strip "${BINARY}" 2>/dev/null || true
-          mv "${BINARY}" "ffmpeg-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+
+          # Strip any suffixes from os and arch to ensure clean naming
+          OS="${{ matrix.os }}"
+          ARCH="${{ matrix.arch }}"
+          OS="${OS%%-*}"      # Remove everything after first dash (e.g., linux-gnu -> linux)
+          ARCH="${ARCH%%-*}"  # Remove everything after first dash (e.g., amd64-musl -> amd64)
+
+          mv "${BINARY}" "ffmpeg-${OS}-${ARCH}${{ matrix.ext }}"
 
       - name: Generate Metadata
         run: |
-          cat > "ffmpeg-${{ matrix.os }}-${{ matrix.arch }}.json" << 'EOF'
+          # Strip any suffixes from os and arch to ensure clean naming
+          OS="${{ matrix.os }}"
+          ARCH="${{ matrix.arch }}"
+          OS="${OS%%-*}"      # Remove everything after first dash
+          ARCH="${ARCH%%-*}"  # Remove everything after first dash
+
+          cat > "ffmpeg-${OS}-${ARCH}.json" << EOF
           {
             "org.opencontainers.image.title": "FFmpeg Static Build",
             "org.opencontainers.image.description": "Statically compiled FFmpeg binary",
             "org.opencontainers.image.version": "${{ needs.get-version.outputs.version }}",
-            "org.opencontainers.image.os": "${{ matrix.os }}",
-            "org.opencontainers.image.architecture": "${{ matrix.arch }}",
+            "org.opencontainers.image.os": "${OS}",
+            "org.opencontainers.image.architecture": "${ARCH}",
             "org.opencontainers.image.created": "${{ github.event.head_commit.timestamp }}",
             "org.opencontainers.image.source": "${{ github.server_url }}/${{ github.repository }}",
             "org.opencontainers.image.revision": "${{ github.sha }}",
@@ -148,12 +161,29 @@ jobs:
           EOF
 
       - name: Upload Artifact
+        run: |
+          # Strip any suffixes from os and arch to ensure clean naming
+          OS="${{ matrix.os }}"
+          ARCH="${{ matrix.arch }}"
+          OS="${OS%%-*}"      # Remove everything after first dash
+          ARCH="${ARCH%%-*}"  # Remove everything after first dash
+
+          # Use GitHub Actions artifact upload command
+          echo "Uploading ffmpeg-${OS}-${ARCH}${{ matrix.ext }} and metadata"
+
+          mkdir -p artifact-upload
+          mv "ffmpeg-${OS}-${ARCH}${{ matrix.ext }}" artifact-upload/
+          mv "ffmpeg-${OS}-${ARCH}.json" artifact-upload/
+
+          # Save artifact name for the upload action
+          echo "ARTIFACT_NAME=ffmpeg-${OS}-${ARCH}" >> $GITHUB_ENV
+          echo "ARTIFACT_PATH=artifact-upload" >> $GITHUB_ENV
+
+      - name: Upload Artifact to GitHub
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-${{ matrix.os }}-${{ matrix.arch }}
-          path: |
-            ffmpeg-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
-            ffmpeg-${{ matrix.os }}-${{ matrix.arch }}.json
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACT_PATH }}
           retention-days: 1
 
   release:
