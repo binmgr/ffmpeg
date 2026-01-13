@@ -41,8 +41,6 @@ jobs:
           - { os: linux, arch: arm64, cross: aarch64-linux-gnu, target_os: linux, ext: "" }
           - { os: windows, arch: amd64, cross: x86_64-w64-mingw32, target_os: mingw32, ext: ".exe" }
           - { os: windows, arch: arm64, cross: aarch64-w64-mingw32, target_os: mingw32, ext: ".exe" }
-          - { os: darwin, arch: amd64, cross: x86_64-apple-darwin23, target_os: darwin, ext: "" }
-          - { os: darwin, arch: arm64, cross: aarch64-apple-darwin23, target_os: darwin, ext: "" }
     steps:
       - name: Setup Environment
         run: |
@@ -78,24 +76,6 @@ jobs:
               echo "CC=aarch64-w64-mingw32-gcc" >> $GITHUB_ENV
               echo "CXX=aarch64-w64-mingw32-g++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=aarch64-w64-mingw32-" >> $GITHUB_ENV
-              ;;
-            darwin-amd64|darwin-arm64)
-              sudo apt-get install -y clang libxml2-dev llvm-dev uuid-dev libssl-dev
-              git clone --depth 1 https://github.com/tpoechtrager/osxcross.git
-              cd osxcross
-              wget https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
-              UNATTENDED=1 ./build.sh || true
-              echo "$PWD/target/bin" >> $GITHUB_PATH
-              cd ..
-              if [ "${{ matrix.arch }}" = "amd64" ]; then
-                echo "CC=x86_64-apple-darwin23-clang" >> $GITHUB_ENV
-                echo "CXX=x86_64-apple-darwin23-clang++" >> $GITHUB_ENV
-                echo "CROSS_PREFIX=x86_64-apple-darwin23-" >> $GITHUB_ENV
-              else
-                echo "CC=aarch64-apple-darwin23-clang" >> $GITHUB_ENV
-                echo "CXX=aarch64-apple-darwin23-clang++" >> $GITHUB_ENV
-                echo "CROSS_PREFIX=aarch64-apple-darwin23-" >> $GITHUB_ENV
-              fi
               ;;
           esac
 
@@ -193,7 +173,7 @@ jobs:
           mkdir -p release
           mv artifacts/* release/ 2>/dev/null || mv artifacts/*/* release/
           cd release
-          chmod +x ffmpeg-linux-* ffmpeg-darwin-* 2>/dev/null || true
+          chmod +x ffmpeg-linux-* 2>/dev/null || true
           sha256sum ffmpeg-* > checksums.txt
 
           # Combined metadata
@@ -220,13 +200,12 @@ jobs:
             --title "FFmpeg ${{ needs.get-version.outputs.version }}" \
             --notes "## FFmpeg ${{ needs.get-version.outputs.version }} Static Builds
 
-          Fully static, multi-platform FFmpeg binaries with all features enabled.
+          Fully static FFmpeg binaries with all features enabled.
 
           | Platform | AMD64 | ARM64 |
           |----------|-------|-------|
           | Linux | \`ffmpeg-linux-amd64\` | \`ffmpeg-linux-arm64\` |
           | Windows | \`ffmpeg-windows-amd64.exe\` | \`ffmpeg-windows-arm64.exe\` |
-          | macOS | \`ffmpeg-darwin-amd64\` | \`ffmpeg-darwin-arm64\` |
 
           **Build**: Static | Stripped | GPL v2+
 
