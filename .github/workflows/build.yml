@@ -60,11 +60,7 @@ jobs:
       matrix:
         include:
           - { os: linux, arch: amd64, cross: x86_64-linux-musl, target_os: linux, ext: "" }
-          - { os: linux, arch: arm64, cross: aarch64-linux-musl, target_os: linux, ext: "" }
-          - { os: windows, arch: amd64, cross: x86_64-w64-mingw32, target_os: mingw32, ext: ".exe" }
-          - { os: windows, arch: arm64, cross: aarch64-w64-mingw32, target_os: mingw32, ext: ".exe" }
-          - { os: darwin, arch: amd64, cross: x86_64-apple-darwin23, target_os: darwin, ext: "" }
-          - { os: darwin, arch: arm64, cross: aarch64-apple-darwin23, target_os: darwin, ext: "" }
+          - { os: linux, arch: arm64, cross: aarch64-linux, target_os: linux, ext: "" }
     steps:
       - name: Configure Cross Compiler
         run: |
@@ -78,9 +74,9 @@ jobs:
               ;;
             linux-arm64)
               # Use pre-installed musl cross-compiler for ARM64
-              echo "CC=aarch64-linux-musl-gcc" >> $GITHUB_ENV
-              echo "CXX=aarch64-linux-musl-g++" >> $GITHUB_ENV
-              echo "CROSS_PREFIX=aarch64-linux-musl-" >> $GITHUB_ENV
+              echo "CC=aarch64-linux-gcc" >> $GITHUB_ENV
+              echo "CXX=aarch64-linux-g++" >> $GITHUB_ENV
+              echo "CROSS_PREFIX=aarch64-linux-" >> $GITHUB_ENV
               ;;
             windows-amd64)
               # Use pre-installed LLVM MinGW for AMD64
@@ -209,10 +205,10 @@ jobs:
           mkdir -p release
           mv artifacts/* release/ 2>/dev/null || mv artifacts/*/* release/
           cd release
-          chmod +x ffmpeg-linux-* ffmpeg-darwin-* 2>/dev/null || true
+          chmod +x ffmpeg-linux-* 2>/dev/null || true
 
           # Generate checksums for all release files (binaries + source)
-          sha256sum ffmpeg-* > checksums.txt
+          sha256sum ffmpeg-linux-* ffmpeg-source.tar.xz > checksums.txt
 
       - name: Delete Existing Release
         env:
@@ -230,17 +226,16 @@ jobs:
 
           Fully static FFmpeg binaries with all features enabled.
 
-          | Platform | AMD64 | ARM64 |
-          |----------|-------|-------|
-          | Linux | \`ffmpeg-linux-amd64\` | \`ffmpeg-linux-arm64\` |
-          | Windows | \`ffmpeg-windows-amd64.exe\` | \`ffmpeg-windows-arm64.exe\` |
-          | macOS | \`ffmpeg-darwin-amd64\` | \`ffmpeg-darwin-arm64\` |
+          | Platform | Binary |
+          |----------|--------|
+          | Linux AMD64 | \`ffmpeg-linux-amd64\` |
+          | Linux ARM64 | \`ffmpeg-linux-arm64\` |
 
           **Source**: \`ffmpeg-source.tar.xz\` (GPL compliance)
 
           **Build**: Truly Static (musl libc) | Stripped | GPL v2+
 
-          **Portability**: Linux binaries run on any Linux distribution (no glibc dependency)
+          **Portability**: Runs on any Linux distribution (no glibc dependency)
 
           Verify: \`sha256sum -c checksums.txt\`" \
             release/*
