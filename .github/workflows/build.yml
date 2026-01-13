@@ -188,7 +188,9 @@ jobs:
           mv artifacts/* release/ 2>/dev/null || mv artifacts/*/* release/
           cd release
           chmod +x ffmpeg-linux-* 2>/dev/null || true
-          sha256sum ffmpeg-* > checksums.txt
+
+          # Generate checksums for all release files (binaries + source)
+          sha256sum ffmpeg-linux-* ffmpeg-windows-* ffmpeg-source.tar.xz > checksums.txt
 
       - name: Delete Existing Release
         env:
