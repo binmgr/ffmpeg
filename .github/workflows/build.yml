@@ -146,32 +146,6 @@ jobs:
 
           mv "${BINARY}" "ffmpeg-${OS}-${ARCH}${{ matrix.ext }}"
 
-      - name: Generate Metadata
-        run: |
-          # Strip any suffixes from os and arch to ensure clean naming
-          OS="${{ matrix.os }}"
-          ARCH="${{ matrix.arch }}"
-          OS="${OS%%-*}"      # Remove everything after first dash
-          ARCH="${ARCH%%-*}"  # Remove everything after first dash
-
-          cat > "ffmpeg-${OS}-${ARCH}.json" << EOF
-          {
-            "org.opencontainers.image.title": "FFmpeg Static Build",
-            "org.opencontainers.image.description": "Statically compiled FFmpeg binary",
-            "org.opencontainers.image.version": "${{ needs.get-version.outputs.version }}",
-            "org.opencontainers.image.os": "${OS}",
-            "org.opencontainers.image.architecture": "${ARCH}",
-            "org.opencontainers.image.created": "${{ github.event.head_commit.timestamp }}",
-            "org.opencontainers.image.source": "${{ github.server_url }}/${{ github.repository }}",
-            "org.opencontainers.image.revision": "${{ github.sha }}",
-            "org.opencontainers.image.vendor": "${{ github.repository_owner }}",
-            "org.opencontainers.image.licenses": "GPL-2.0-or-later",
-            "build.target": "${{ matrix.cross }}",
-            "build.static": "true",
-            "build.stripped": "true"
-          }
-          EOF
-
       - name: Upload Artifact
         run: |
           # Strip any suffixes from os and arch to ensure clean naming
@@ -180,12 +154,10 @@ jobs:
           OS="${OS%%-*}"      # Remove everything after first dash
           ARCH="${ARCH%%-*}"  # Remove everything after first dash
 
-          # Use GitHub Actions artifact upload command
-          echo "Uploading ffmpeg-${OS}-${ARCH}${{ matrix.ext }} and metadata"
+          echo "Uploading ffmpeg-${OS}-${ARCH}${{ matrix.ext }}"
 
           mkdir -p artifact-upload
           mv "ffmpeg-${OS}-${ARCH}${{ matrix.ext }}" artifact-upload/
-          mv "ffmpeg-${OS}-${ARCH}.json" artifact-upload/
 
           # Save artifact name for the upload action
           echo "ARTIFACT_NAME=ffmpeg-${OS}-${ARCH}" >> $GITHUB_ENV
@@ -217,16 +189,6 @@ jobs:
           cd release
           chmod +x ffmpeg-linux-* 2>/dev/null || true
           sha256sum ffmpeg-* > checksums.txt
-
-          # Combined metadata
-          echo "[" > metadata.json
-          first=true
-          for f in *.json; do
-            [ "$f" = "metadata.json" ] && continue
-            [ "$first" = true ] && first=false || echo "," >> metadata.json
-            cat "$f" >> metadata.json
-          done
-          echo "]" >> metadata.json
 
       - name: Delete Existing Release
         env:
