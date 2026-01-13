@@ -55,6 +55,8 @@ jobs:
           - { os: linux, arch: arm64, cross: aarch64-linux-musl, target_os: linux, ext: "" }
           - { os: windows, arch: amd64, cross: x86_64-w64-mingw32, target_os: mingw32, ext: ".exe" }
           - { os: windows, arch: arm64, cross: aarch64-w64-mingw32, target_os: mingw32, ext: ".exe" }
+          - { os: darwin, arch: amd64, cross: x86_64-apple-darwin23, target_os: darwin, ext: "" }
+          - { os: darwin, arch: arm64, cross: aarch64-apple-darwin23, target_os: darwin, ext: "" }
     steps:
       - name: Configure Cross Compiler
         run: |
@@ -83,6 +85,18 @@ jobs:
               echo "CC=aarch64-w64-mingw32-gcc" >> $GITHUB_ENV
               echo "CXX=aarch64-w64-mingw32-g++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=aarch64-w64-mingw32-" >> $GITHUB_ENV
+              ;;
+            darwin-amd64)
+              # Use pre-installed OSXCross for macOS AMD64
+              echo "CC=x86_64-apple-darwin23-clang" >> $GITHUB_ENV
+              echo "CXX=x86_64-apple-darwin23-clang++" >> $GITHUB_ENV
+              echo "CROSS_PREFIX=x86_64-apple-darwin23-" >> $GITHUB_ENV
+              ;;
+            darwin-arm64)
+              # Use pre-installed OSXCross for macOS ARM64
+              echo "CC=aarch64-apple-darwin23-clang" >> $GITHUB_ENV
+              echo "CXX=aarch64-apple-darwin23-clang++" >> $GITHUB_ENV
+              echo "CROSS_PREFIX=aarch64-apple-darwin23-" >> $GITHUB_ENV
               ;;
           esac
 
@@ -183,10 +197,10 @@ jobs:
           mkdir -p release
           mv artifacts/* release/ 2>/dev/null || mv artifacts/*/* release/
           cd release
-          chmod +x ffmpeg-linux-* 2>/dev/null || true
+          chmod +x ffmpeg-linux-* ffmpeg-darwin-* 2>/dev/null || true
 
           # Generate checksums for all release files (binaries + source)
-          sha256sum ffmpeg-linux-* ffmpeg-windows-* ffmpeg-source.tar.xz > checksums.txt
+          sha256sum ffmpeg-* > checksums.txt
 
       - name: Delete Existing Release
         env:
@@ -208,6 +222,7 @@ jobs:
           |----------|-------|-------|
           | Linux | \`ffmpeg-linux-amd64\` | \`ffmpeg-linux-arm64\` |
           | Windows | \`ffmpeg-windows-amd64.exe\` | \`ffmpeg-windows-arm64.exe\` |
+          | macOS | \`ffmpeg-darwin-amd64\` | \`ffmpeg-darwin-arm64\` |
 
           **Source**: \`ffmpeg-source.tar.xz\` (GPL compliance)
 
