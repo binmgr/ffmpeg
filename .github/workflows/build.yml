@@ -92,8 +92,10 @@ jobs:
               echo "CROSS_PREFIX=" >> $GITHUB_ENV
               ;;
             linux-arm64)
-              # Cross-compile for ARM64 with musl
-              apk add --no-cache gcc-aarch64 g++-aarch64
+              # Download musl cross-compiler for ARM64
+              wget https://musl.cc/aarch64-linux-musl-cross.tgz
+              tar xzf aarch64-linux-musl-cross.tgz
+              echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
               echo "CC=aarch64-linux-musl-gcc" >> $GITHUB_ENV
               echo "CXX=aarch64-linux-musl-g++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=aarch64-linux-musl-" >> $GITHUB_ENV
@@ -105,6 +107,8 @@ jobs:
               echo "CROSS_PREFIX=x86_64-w64-mingw32-" >> $GITHUB_ENV
               ;;
             windows-arm64)
+              # Install clang for LLVM MinGW
+              apk add --no-cache clang lld
               # Download LLVM MinGW for ARM64 Windows
               wget https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
               tar xJf llvm-mingw-*.tar.xz
