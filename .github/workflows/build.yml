@@ -15,10 +15,14 @@ on:
 jobs:
   get-version:
     runs-on: ubuntu-latest
+    container: alpine:latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
+      - name: Install Dependencies
+        run: apk add --no-cache curl grep coreutils wget
+
       - name: Get FFmpeg Version
         id: version
         run: |
@@ -45,43 +49,63 @@ jobs:
   build:
     needs: get-version
     runs-on: ubuntu-latest
+    container: alpine:latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: linux, arch: amd64, cross: x86_64-linux-gnu, target_os: linux, ext: "" }
-          - { os: linux, arch: arm64, cross: aarch64-linux-gnu, target_os: linux, ext: "" }
+          - { os: linux, arch: amd64, cross: x86_64-linux-musl, target_os: linux, ext: "" }
+          - { os: linux, arch: arm64, cross: aarch64-linux-musl, target_os: linux, ext: "" }
           - { os: windows, arch: amd64, cross: x86_64-w64-mingw32, target_os: mingw32, ext: ".exe" }
           - { os: windows, arch: arm64, cross: aarch64-w64-mingw32, target_os: mingw32, ext: ".exe" }
     steps:
       - name: Setup Environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config nasm yasm git curl wget autoconf automake libtool texinfo zlib1g-dev libssl-dev xz-utils
+          # Install base build tools (Alpine uses musl libc by default)
+          apk add --no-cache \
+            build-base \
+            cmake \
+            pkgconf \
+            nasm \
+            yasm \
+            git \
+            curl \
+            wget \
+            autoconf \
+            automake \
+            libtool \
+            texinfo \
+            zlib-dev \
+            zlib-static \
+            openssl-dev \
+            openssl-libs-static \
+            linux-headers \
+            xz
 
       - name: Install Cross Compiler
         run: |
           case "${{ matrix.os }}-${{ matrix.arch }}" in
             linux-amd64)
-              # Native build on x86_64
+              # Native musl build on x86_64
               echo "CC=gcc" >> $GITHUB_ENV
               echo "CXX=g++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=" >> $GITHUB_ENV
               ;;
             linux-arm64)
-              # Cross-compile for ARM64
-              sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-              echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-              echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-              echo "CROSS_PREFIX=aarch64-linux-gnu-" >> $GITHUB_ENV
+              # Cross-compile for ARM64 with musl
+              apk add --no-cache gcc-aarch64 g++-aarch64
+              echo "CC=aarch64-linux-musl-gcc" >> $GITHUB_ENV
+              echo "CXX=aarch64-linux-musl-g++" >> $GITHUB_ENV
+              echo "CROSS_PREFIX=aarch64-linux-musl-" >> $GITHUB_ENV
               ;;
             windows-amd64)
-              sudo apt-get install -y mingw-w64
+              apk add --no-cache mingw-w64-gcc
               echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
               echo "CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=x86_64-w64-mingw32-" >> $GITHUB_ENV
               ;;
             windows-arm64)
+              # Download LLVM MinGW for ARM64 Windows
               wget https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
               tar xJf llvm-mingw-*.tar.xz
               echo "$PWD/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64/bin" >> $GITHUB_PATH
@@ -173,9 +197,13 @@ jobs:
   release:
     needs: [get-version, build]
     runs-on: ubuntu-latest
+    container: alpine:latest
     permissions:
       contents: write
     steps:
+      - name: Install Dependencies
+        run: apk add --no-cache github-cli coreutils bash
+
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -215,7 +243,9 @@ jobs:
 
           **Source**: \`ffmpeg-source.tar.xz\` (GPL compliance)
 
-          **Build**: Static | Stripped | GPL v2+
+          **Build**: Truly Static (musl libc) | Stripped | GPL v2+
+
+          **Portability**: Linux binaries run on any Linux distribution (no glibc dependency)
 
           Verify: \`sha256sum -c checksums.txt\`" \
             release/*
