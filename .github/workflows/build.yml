@@ -55,7 +55,7 @@ jobs:
         run: |
           case "${{ matrix.os }}-${{ matrix.arch }}" in
             linux-amd64)
-              wget -q https://musl.cc/x86_64-linux-musl-cross.tgz
+              wget https://musl.cc/x86_64-linux-musl-cross.tgz
               tar xzf x86_64-linux-musl-cross.tgz
               echo "$PWD/x86_64-linux-musl-cross/bin" >> $GITHUB_PATH
               echo "CC=x86_64-linux-musl-gcc" >> $GITHUB_ENV
@@ -63,7 +63,7 @@ jobs:
               echo "CROSS_PREFIX=x86_64-linux-musl-" >> $GITHUB_ENV
               ;;
             linux-arm64)
-              wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
+              wget https://musl.cc/aarch64-linux-musl-cross.tgz
               tar xzf aarch64-linux-musl-cross.tgz
               echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
               echo "CC=aarch64-linux-musl-gcc" >> $GITHUB_ENV
@@ -77,7 +77,7 @@ jobs:
               echo "CROSS_PREFIX=x86_64-w64-mingw32-" >> $GITHUB_ENV
               ;;
             windows-arm64)
-              wget -q https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
+              wget https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
               tar xJf llvm-mingw-*.tar.xz
               echo "$PWD/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64/bin" >> $GITHUB_PATH
               echo "CC=aarch64-w64-mingw32-gcc" >> $GITHUB_ENV
@@ -88,7 +88,7 @@ jobs:
               sudo apt-get install -y clang libxml2-dev llvm-dev uuid-dev libssl-dev
               git clone --depth 1 https://github.com/tpoechtrager/osxcross.git
               cd osxcross
-              wget -q https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
+              wget https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
               UNATTENDED=1 ./build.sh || true
               echo "$PWD/target/bin" >> $GITHUB_PATH
               cd ..
@@ -105,7 +105,7 @@ jobs:
             freebsd-*)
               sudo apt-get install -y clang lld
               # Download FreeBSD base for headers/libs
-              wget -q https://download.freebsd.org/releases/amd64/14.0-RELEASE/base.txz
+              wget https://download.freebsd.org/releases/amd64/14.0-RELEASE/base.txz
               mkdir -p /opt/freebsd
               sudo tar xJf base.txz -C /opt/freebsd ./lib ./usr/lib ./usr/include
               echo "CC=clang" >> $GITHUB_ENV
@@ -117,8 +117,9 @@ jobs:
 
       - name: Download FFmpeg
         run: |
-          wget -q "https://ffmpeg.org/releases/ffmpeg-${{ needs.get-version.outputs.version }}.tar.xz"
+          wget "https://ffmpeg.org/releases/ffmpeg-${{ needs.get-version.outputs.version }}.tar.xz"
           tar xJf ffmpeg-*.tar.xz
+          rm -f ffmpeg-*.tar.xz
           mv ffmpeg-* ffmpeg-src
 
       - name: Build FFmpeg
