@@ -75,15 +75,15 @@ jobs:
               echo "CROSS_PREFIX=aarch64-linux-musl-" >> $GITHUB_ENV
               ;;
             windows-amd64)
-              # Use pre-installed MinGW
-              echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
-              echo "CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
+              # Use pre-installed LLVM MinGW for AMD64
+              echo "CC=x86_64-w64-mingw32-clang" >> $GITHUB_ENV
+              echo "CXX=x86_64-w64-mingw32-clang++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=x86_64-w64-mingw32-" >> $GITHUB_ENV
               ;;
             windows-arm64)
               # Use pre-installed LLVM MinGW for ARM64
-              echo "CC=aarch64-w64-mingw32-gcc" >> $GITHUB_ENV
-              echo "CXX=aarch64-w64-mingw32-g++" >> $GITHUB_ENV
+              echo "CC=aarch64-w64-mingw32-clang" >> $GITHUB_ENV
+              echo "CXX=aarch64-w64-mingw32-clang++" >> $GITHUB_ENV
               echo "CROSS_PREFIX=aarch64-w64-mingw32-" >> $GITHUB_ENV
               ;;
             darwin-amd64)
