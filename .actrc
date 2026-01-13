@@ -1,0 +1,8 @@
+# Act configuration for local workflow testing
+# This helps test GitHub Actions workflows locally without using GitHub Actions minutes
+
+# Use a larger Docker image that has more tools pre-installed
+-P ubuntu-latest=catthehacker/ubuntu:full-latest
+
+# Optionally set artifact server (speeds up artifact operations)
+# --artifact-server-path /tmp/artifacts
