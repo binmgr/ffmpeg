@@ -30,6 +30,18 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
 
+      - name: Download FFmpeg Source
+        run: |
+          wget "https://ffmpeg.org/releases/ffmpeg-${{ steps.version.outputs.version }}.tar.xz"
+          mv ffmpeg-${{ steps.version.outputs.version }}.tar.xz ffmpeg-source.tar.xz
+
+      - name: Upload Source Archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-source
+          path: ffmpeg-source.tar.xz
+          retention-days: 1
+
   build:
     needs: get-version
     runs-on: ubuntu-latest
@@ -236,6 +248,8 @@ jobs:
           |----------|-------|-------|
           | Linux | \`ffmpeg-linux-amd64\` | \`ffmpeg-linux-arm64\` |
           | Windows | \`ffmpeg-windows-amd64.exe\` | \`ffmpeg-windows-arm64.exe\` |
+
+          **Source**: \`ffmpeg-source.tar.xz\` (GPL compliance)
 
           **Build**: Static | Stripped | GPL v2+
 
