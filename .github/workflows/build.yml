@@ -3,8 +3,11 @@ name: Build FFmpeg Static Binaries
 on:
   push:
     branches: [main, master]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/build.yml'
   schedule:
-    - cron: '0 0 1 * *'
+    - cron: '0 0 1 */3 *'
   workflow_dispatch:
     inputs:
       ffmpeg_version:
@@ -12,14 +15,13 @@ on:
         required: false
         default: ''
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: binmgr/ffmpeg
+
 jobs:
   get-version:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/binmgr/toolchain:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
@@ -35,187 +37,67 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
 
-      - name: Download FFmpeg Source
-        run: |
-          wget "https://ffmpeg.org/releases/ffmpeg-${{ steps.version.outputs.version }}.tar.xz"
-          mv ffmpeg-${{ steps.version.outputs.version }}.tar.xz ffmpeg-source.tar.xz
-
-      - name: Upload Source Archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffmpeg-source
-          path: ffmpeg-source.tar.xz
-          retention-days: 1
-
   build:
+    name: Build (${{ matrix.arch }})
     needs: get-version
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/binmgr/toolchain:latest
+      image: ghcr.io/binmgr/ffmpeg:build
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: linux, arch: amd64, cross: x86_64-linux-musl, target_os: linux, ext: "" }
-          - { os: linux, arch: arm64, cross: aarch64-linux, target_os: linux, ext: "" }
+        arch: [amd64, arm64]
+
     steps:
-      - name: Configure Cross Compiler
-        run: |
-          # All toolchains are pre-installed in the custom Docker image
-          case "${{ matrix.os }}-${{ matrix.arch }}" in
-            linux-amd64)
-              # Native musl build on x86_64
-              echo "CC=gcc" >> $GITHUB_ENV
-              echo "CXX=g++" >> $GITHUB_ENV
-              echo "CROSS_PREFIX=" >> $GITHUB_ENV
-              ;;
-            linux-arm64)
-              # Use pre-installed musl cross-compiler for ARM64
-              echo "CC=aarch64-linux-gcc" >> $GITHUB_ENV
-              echo "CXX=aarch64-linux-g++" >> $GITHUB_ENV
-              echo "CROSS_PREFIX=aarch64-linux-" >> $GITHUB_ENV
-              ;;
-            windows-amd64)
-              # Use pre-installed LLVM MinGW for AMD64
-              echo "CC=x86_64-w64-mingw32-clang" >> $GITHUB_ENV
-              echo "CXX=x86_64-w64-mingw32-clang++" >> $GITHUB_ENV
-              echo "CROSS_PREFIX=x86_64-w64-mingw32-" >> $GITHUB_ENV
-              ;;
-            windows-arm64)
-              # Use pre-installed LLVM MinGW for ARM64
-              echo "CC=aarch64-w64-mingw32-clang" >> $GITHUB_ENV
-              echo "CXX=aarch64-w64-mingw32-clang++" >> $GITHUB_ENV
-              echo "CROSS_PREFIX=aarch64-w64-mingw32-" >> $GITHUB_ENV
-              ;;
-            darwin-amd64)
-              # Use pre-installed OSXCross for macOS AMD64
-              echo "CC=x86_64-apple-darwin23-clang" >> $GITHUB_ENV
-              echo "CXX=x86_64-apple-darwin23-clang++" >> $GITHUB_ENV
-              echo "CROSS_PREFIX=x86_64-apple-darwin23-" >> $GITHUB_ENV
-              ;;
-            darwin-arm64)
-              # Use pre-installed OSXCross for macOS ARM64
-              echo "CC=aarch64-apple-darwin23-clang" >> $GITHUB_ENV
-              echo "CXX=aarch64-apple-darwin23-clang++" >> $GITHUB_ENV
-              echo "CROSS_PREFIX=aarch64-apple-darwin23-" >> $GITHUB_ENV
-              ;;
-          esac
-
-      - name: Download FFmpeg
-        run: |
-          wget "https://ffmpeg.org/releases/ffmpeg-${{ needs.get-version.outputs.version }}.tar.xz"
-          tar xJf ffmpeg-*.tar.xz
-          rm -f ffmpeg-*.tar.xz
-          mv ffmpeg-* ffmpeg-src
-
       - name: Build FFmpeg
-        run: |
-          cd ffmpeg-src
-          mkdir -p ../output
+        run: build-ffmpeg ${{ matrix.arch }} ${{ needs.get-version.outputs.version }}
 
-          CONFIGURE_FLAGS="
-            --prefix=$PWD/../output
-            --enable-gpl
-            --enable-version3
-            --enable-nonfree
-            --enable-static
-            --disable-shared
-            --disable-debug
-            --disable-doc
-            --disable-ffplay
-            --pkg-config-flags=--static
-          "
-
-          # Add cross-compile flags only when needed
-          if [ -n "${CROSS_PREFIX}" ]; then
-            CONFIGURE_FLAGS="${CONFIGURE_FLAGS}
-              --enable-cross-compile
-              --cross-prefix=${CROSS_PREFIX}
-              --arch=${{ matrix.arch }}
-              --target-os=${{ matrix.target_os }}
-            "
-          fi
-
-          # Try static linking, fall back to dynamic if it fails
-          CONFIGURE_FLAGS="${CONFIGURE_FLAGS} --extra-ldflags=-static"
-
-          ./configure ${CONFIGURE_FLAGS} || { cat ffbuild/config.log; exit 1; }
-          make -j$(nproc)
-          make install
-
-      - name: Strip Binary
-        run: |
-          BINARY="output/bin/ffmpeg${{ matrix.ext }}"
-          ${CROSS_PREFIX}strip "${BINARY}" 2>/dev/null || strip "${BINARY}" 2>/dev/null || true
-
-          # Strip any suffixes from os and arch to ensure clean naming
-          OS="${{ matrix.os }}"
-          ARCH="${{ matrix.arch }}"
-          OS="${OS%%-*}"      # Remove everything after first dash (e.g., linux-gnu -> linux)
-          ARCH="${ARCH%%-*}"  # Remove everything after first dash (e.g., amd64-musl -> amd64)
-
-          mv "${BINARY}" "ffmpeg-${OS}-${ARCH}${{ matrix.ext }}"
-
-      - name: Upload Artifact
-        run: |
-          # Strip any suffixes from os and arch to ensure clean naming
-          OS="${{ matrix.os }}"
-          ARCH="${{ matrix.arch }}"
-          OS="${OS%%-*}"      # Remove everything after first dash
-          ARCH="${ARCH%%-*}"  # Remove everything after first dash
-
-          echo "Uploading ffmpeg-${OS}-${ARCH}${{ matrix.ext }}"
-
-          mkdir -p artifact-upload
-          mv "ffmpeg-${OS}-${ARCH}${{ matrix.ext }}" artifact-upload/
-
-          # Save artifact name for the upload action
-          echo "ARTIFACT_NAME=ffmpeg-${OS}-${ARCH}" >> $GITHUB_ENV
-          echo "ARTIFACT_PATH=artifact-upload" >> $GITHUB_ENV
-
-      - name: Upload Artifact to GitHub
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.ARTIFACT_PATH }}
+          name: ffmpeg-linux-${{ matrix.arch }}
+          path: |
+            /output/ffmpeg-linux-${{ matrix.arch }}
+            /output/ffprobe-linux-${{ matrix.arch }}
           retention-days: 1
 
   release:
+    name: Release
     needs: [get-version, build]
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/binmgr/toolchain:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: write
+      packages: write
+
     steps:
-      - name: Download Artifacts
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Prepare Release
+      - name: Prepare release
         run: |
           mkdir -p release
-          mv artifacts/* release/ 2>/dev/null || mv artifacts/*/* release/
+          cp artifacts/* release/
+          chmod +x release/*
           cd release
-          chmod +x ffmpeg-linux-* 2>/dev/null || true
+          sha256sum * > checksums.txt
 
-          # Generate checksums for all release files (binaries + source)
-          sha256sum ffmpeg-linux-* ffmpeg-source.tar.xz > checksums.txt
-
-      - name: Delete Existing Release
+      - name: Delete existing release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release delete "${{ needs.get-version.outputs.tag }}" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+        run: |
+          gh release delete "${{ needs.get-version.outputs.tag }}" \
+            --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
 
-      - name: Create Release
+      - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -224,18 +106,47 @@ jobs:
             --title "FFmpeg ${{ needs.get-version.outputs.version }}" \
             --notes "## FFmpeg ${{ needs.get-version.outputs.version }} Static Builds
 
-          Fully static FFmpeg binaries with all features enabled.
+          Fully static FFmpeg binaries (musl libc).
 
-          | Platform | Binary |
-          |----------|--------|
-          | Linux AMD64 | \`ffmpeg-linux-amd64\` |
-          | Linux ARM64 | \`ffmpeg-linux-arm64\` |
+          | Platform | ffmpeg | ffprobe |
+          |----------|--------|---------|
+          | Linux AMD64 | \`ffmpeg-linux-amd64\` | \`ffprobe-linux-amd64\` |
+          | Linux ARM64 | \`ffmpeg-linux-arm64\` | \`ffprobe-linux-arm64\` |
 
-          **Source**: \`ffmpeg-source.tar.xz\` (GPL compliance)
+          ### Docker
+          \`\`\`bash
+          docker run --rm ghcr.io/binmgr/ffmpeg:latest -version
+          \`\`\`
 
-          **Build**: Truly Static (musl libc) | Stripped | GPL v2+
-
-          **Portability**: Runs on any Linux distribution (no glibc dependency)
-
-          Verify: \`sha256sum -c checksums.txt\`" \
+          ### Verify
+          \`\`\`bash
+          sha256sum -c checksums.txt
+          \`\`\`" \
             release/*
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image context
+        run: |
+          cp release/ffmpeg-linux-amd64 .
+          cp release/ffmpeg-linux-arm64 .
+          cp release/ffprobe-linux-amd64 .
+          cp release/ffprobe-linux-arm64 .
+
+      - name: Build and push runtime image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.get-version.outputs.version }}

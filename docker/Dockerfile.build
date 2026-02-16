@@ -1,0 +1,136 @@
+# =============================================================================
+# FFmpeg Build Environment
+# =============================================================================
+# Minimal build environment for static FFmpeg compilation
+# Supports: linux/amd64 (native), linux/arm64 (cross-compile on amd64)
+#
+# Usage:
+#   docker build -f docker/Dockerfile.build -t ghcr.io/binmgr/ffmpeg:build .
+#   docker run --rm -v $(pwd)/output:/output ghcr.io/binmgr/ffmpeg:build build-ffmpeg amd64
+# =============================================================================
+
+FROM alpine:3.21
+
+ARG BOOTLIN_VERSION=2024.02-1
+
+# Install build essentials
+RUN apk add --no-cache \
+    build-base \
+    curl \
+    wget \
+    git \
+    autoconf \
+    automake \
+    libtool \
+    pkgconf \
+    linux-headers \
+    tar \
+    xz \
+    bzip2 \
+    ca-certificates \
+    nasm \
+    yasm \
+    perl \
+    # For running glibc binaries (Bootlin toolchain)
+    gcompat \
+    # Static libraries for native builds
+    zlib-static
+
+ENV BOOTLIN_DIR=/opt/cross/aarch64-linux-musl
+
+# =============================================================================
+# Install Bootlin cross-compiler (for ARM64 cross-compilation)
+# =============================================================================
+RUN mkdir -p /opt/cross && \
+    wget -q "https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--musl--stable-${BOOTLIN_VERSION}.tar.bz2" && \
+    tar xjf "aarch64--musl--stable-${BOOTLIN_VERSION}.tar.bz2" -C /opt/cross && \
+    mv "/opt/cross/aarch64--musl--stable-${BOOTLIN_VERSION}" ${BOOTLIN_DIR} && \
+    rm -f "aarch64--musl--stable-${BOOTLIN_VERSION}.tar.bz2" && \
+    # Create wrapper scripts that call .br_real directly
+    cd ${BOOTLIN_DIR}/bin && \
+    for tool in gcc g++; do \
+        rm -f aarch64-linux-$tool && \
+        printf '#!/bin/sh\nexec %s/bin/aarch64-buildroot-linux-musl-'$tool'.br_real "$@"\n' ${BOOTLIN_DIR} > aarch64-linux-$tool && \
+        chmod +x aarch64-linux-$tool; \
+    done && \
+    for tool in ar strip ranlib; do \
+        rm -f aarch64-linux-$tool && \
+        ln -sf aarch64-buildroot-linux-musl-$tool aarch64-linux-$tool; \
+    done
+
+ENV PATH="${BOOTLIN_DIR}/bin:${PATH}"
+
+WORKDIR /build
+
+# =============================================================================
+# Build script
+# =============================================================================
+COPY <<'EOF' /usr/local/bin/build-ffmpeg
+#!/bin/sh
+set -e
+
+ARCH="${1:-amd64}"
+FFMPEG_VERSION="${2:-}"
+
+# Determine compiler and flags based on architecture
+case "$ARCH" in
+    amd64)
+        CC=gcc
+        STRIP=strip
+        CROSS_FLAGS=""
+        ;;
+    arm64)
+        CC=aarch64-linux-gcc
+        STRIP=aarch64-linux-strip
+        CROSS_FLAGS="--enable-cross-compile --cross-prefix=aarch64-linux- --arch=aarch64 --target-os=linux"
+        ;;
+    *)
+        echo "Unknown architecture: $ARCH"
+        exit 1
+        ;;
+esac
+
+# Get FFmpeg version if not specified
+if [ -z "$FFMPEG_VERSION" ]; then
+    FFMPEG_VERSION=$(curl -s https://ffmpeg.org/releases/ | grep -oP 'ffmpeg-\K[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V | tail -1)
+fi
+
+echo "Building FFmpeg ${FFMPEG_VERSION} for ${ARCH}..."
+
+cd /build
+wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
+tar xJf ffmpeg-${FFMPEG_VERSION}.tar.xz
+cd ffmpeg-${FFMPEG_VERSION}
+
+./configure \
+    --prefix=/tmp/ffmpeg-install \
+    --enable-gpl \
+    --enable-version3 \
+    --enable-nonfree \
+    --enable-static \
+    --disable-shared \
+    --disable-debug \
+    --disable-doc \
+    --disable-ffplay \
+    --pkg-config-flags="--static" \
+    --extra-ldflags="-static" \
+    ${CROSS_FLAGS}
+
+make -j$(nproc)
+${STRIP} ffmpeg ffprobe
+
+mkdir -p /output
+cp ffmpeg /output/ffmpeg-linux-${ARCH}
+cp ffprobe /output/ffprobe-linux-${ARCH}
+
+echo "Built:"
+ls -lh /output/ffmpeg-linux-${ARCH}
+ls -lh /output/ffprobe-linux-${ARCH}
+EOF
+
+RUN chmod +x /usr/local/bin/build-ffmpeg
+
+WORKDIR /workspace
+VOLUME ["/workspace", "/output"]
+
+CMD ["echo", "Usage: docker run --rm -v $(pwd)/output:/output ghcr.io/binmgr/ffmpeg:build build-ffmpeg [amd64|arm64] [version]"]
