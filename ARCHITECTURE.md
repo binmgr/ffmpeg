@@ -6,11 +6,11 @@ This repository automatically builds static FFmpeg binaries for multiple platfor
 
 ## Build Infrastructure
 
-### Toolchain Image
-- **Repository**: [binmgr/toolchain](https://github.com/binmgr/toolchain)
-- **Image**: `ghcr.io/binmgr/toolchain:latest`
+### Build Image
+- **Repository**: [binmgr/ffmpeg](https://github.com/binmgr/ffmpeg)
+- **Image**: `ghcr.io/binmgr/ffmpeg:build`
 - **Base**: Alpine Linux (musl libc)
-- **Size**: ~2-3 GB (comprehensive library coverage)
+- **Purpose**: Prebuilt FFmpeg build environment for GitHub Actions
 - **Architecture**: linux/amd64 (runs on x86_64 GitHub Actions runners)
 
 ### Supported Build Targets
@@ -18,48 +18,40 @@ This repository automatically builds static FFmpeg binaries for multiple platfor
 | Platform | Architecture | Toolchain | Binary Type |
 |----------|-------------|-----------|-------------|
 | Linux | AMD64 | Native GCC (musl) | Truly static (no glibc) |
-| Linux | ARM64 | Bootlin musl cross-compiler | Truly static (no glibc) |
-| Windows | AMD64 | MinGW-w64 | Static |
-| Windows | ARM64 | LLVM MinGW | Static |
-| macOS | AMD64 | OSXCross | Partial static |
-| macOS | ARM64 | OSXCross | Partial static |
+| Linux | ARM64 | musl.cc cross-compiler | Truly static (no glibc) |
 
 ## Binary Naming
 
 All binaries follow the pattern: `ffmpeg-{platform}-{arch}`
 
 - Suffixes (-gnu, -musl, -mingw, etc.) are automatically stripped
-- Platform names: `linux`, `windows`, `darwin`
+- Platform name: `linux`
 - Architecture names: `amd64`, `arm64`
-- Windows extension: `.exe`
 
 Examples:
 - `ffmpeg-linux-amd64`
-- `ffmpeg-windows-arm64.exe`
-- `ffmpeg-darwin-amd64`
+- `ffmpeg-linux-arm64`
+- `ffprobe-linux-amd64`
 
 ## Build Process
 
 ### 1. Get Version
 - Detects latest FFmpeg version from ffmpeg.org
-- Downloads source tarball (`ffmpeg-source.tar.xz`)
-- Uploads as artifact for GPL compliance
 
 ### 2. Build Matrix
-- Parallel builds for all 6 platforms
-- Each build uses pre-installed cross-compilers from toolchain image
-- Configure flags optimized for static linking
-- ~7-10 minutes per platform
+- Parallel builds for the Linux amd64 and arm64 targets
+- Each build uses the pre-installed compilers from `ghcr.io/binmgr/ffmpeg:build`
+- Configure flags are optimized for static linking
 
 ### 3. Release
-- Collects all binaries and source
+- Collects the Linux binaries and ffprobe artifacts
 - Generates SHA256 checksums for all files
 - Creates GitHub release with version tag (e.g., `v8.0.1`)
 - Includes build metadata in release notes
 
 ## Release Schedule
 
-- **Monthly**: 1st of each month (automated via cron)
+- **Quarterly**: 1st day of every third month (automated via cron)
 - **Manual**: Via workflow_dispatch when needed
 - **Push**: Triggered on pushes to main branch
 
@@ -71,45 +63,41 @@ Use [act](https://github.com/nektos/act) to test workflows locally:
 # Test version detection
 act -j get-version
 
-# Test a single platform build
-act -j build --matrix os:linux --matrix arch:amd64
+# Test a single architecture build
+act -j build --matrix arch:amd64
 ```
 
 See `ACT_USAGE.md` for detailed instructions.
 
-## GPL Compliance
+## Release Contents
 
 Every release includes:
-- **Source archive**: `ffmpeg-source.tar.xz` (exact source used)
+- **Binaries**: `ffmpeg-linux-{arch}` and `ffprobe-linux-{arch}`
 - **Checksums**: SHA256 hashes for verification
 - **License**: GPLv2+ (referenced in release notes)
 
 ## Toolchain Details
 
-The `ghcr.io/binmgr/toolchain` image includes:
+The `ghcr.io/binmgr/ffmpeg:build` image includes:
 
-**60+ Pre-installed Libraries:**
+**Pre-installed Libraries:**
 - Compression: zlib, bzip2, xz, lz4, zstd
 - Crypto: OpenSSL
 - Images: libpng, libjpeg, giflib, libwebp, tiff
-- Audio/Video: opus, vorbis, ogg, lame, theora, x264, x265, libvpx, aom, dav1d
-- Fonts: freetype, fontconfig, fribidi, harfbuzz
-- Network: curl, c-ares, nghttp2, libssh2
-- Data: libxml2, expat, json-c, yaml, protobuf
-- And more...
+- Audio/Video: opus, vorbis, ogg, lame, theora, x264, libvpx, aom, fdk-aac
+- Fonts: freetype
+- Network/Crypto: curl, OpenSSL
 
-**All Cross-Compilers Ready:**
-- No downloads during build time
-- Faster builds (2-3 min savings)
-- Reliable (no external dependency failures)
-- Consistent across all builds
+**Linux Build Toolchains Ready:**
+- Native amd64 toolchain and static libraries
+- musl.cc ARM64 cross-compiler for Linux releases
+- Consistent compiler setup across every GitHub Actions run
 
 ## Benefits of This Approach
 
 ✅ **Truly Portable**: Linux binaries use musl (no glibc dependency)
 ✅ **Fast**: Parallel builds, pre-installed toolchains
-✅ **Reliable**: No external download failures during builds
-✅ **Comprehensive**: 6 platforms, 60+ libraries
-✅ **GPL Compliant**: Source included in every release
-✅ **Reproducible**: Versioned toolchain image (YYMM tags)
-✅ **Reusable**: Toolchain works for any binmgr project
+✅ **Reliable**: Consistent toolchains across GitHub Actions runs
+✅ **Comprehensive**: Linux amd64/arm64 builds with bundled static dependencies
+✅ **GPL Compliant**: GPL-licensed release artifacts with checksums
+✅ **Reproducible**: Versioned build image in the same repository

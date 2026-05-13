@@ -1,4 +1,4 @@
-name: Build FFmpeg Static Binaries
+name: Build Binaries
 
 on:
   push:

@@ -1,99 +1,867 @@
 # =============================================================================
 # FFmpeg Build Environment
 # =============================================================================
-FROM alpine:latest
+FROM alpine:3.21
 
-# Install build tools and available static libraries
+ARG BOOTLIN_VERSION=2024.02-1
+ARG LIBOGG_VERSION=1.3.5
+ARG LIBVORBIS_VERSION=1.3.7
+ARG FDK_AAC_VERSION=2.0.3
+ARG OPUS_VERSION=1.5.2
+ARG DAV1D_VERSION=1.5.0
+ARG VIDSTAB_VERSION=1.1.1
+ARG RUBBERBAND_VERSION=3.3.0
+ARG ZIMG_VERSION=3.0.5
+ARG SVT_AV1_VERSION=2.2.1
+ARG LIBVPX_VERSION=1.15.0
+ARG X264_REF=b35605ace3ddf7c1a5d67a2eb553f034aef41d55
+ARG X265_VERSION=3.6
+ARG BROTLI_VERSION=1.1.0
+ARG HARFBUZZ_VERSION=9.0.0
+ARG LIBASS_VERSION=0.17.3
+
 RUN apk add --no-cache \
-    build-base curl wget git autoconf automake libtool pkgconf cmake meson ninja bash diffutils \
-    linux-headers tar xz bzip2 ca-certificates nasm yasm perl python3 \
-    # Static libraries available in Alpine
-    zlib-static openssl-libs-static \
-    libogg-static libvorbis-static libtheora-static \
-    libwebp-static freetype-static \
-    aom-static \
-    # freetype static dependencies
-    bzip2-static libpng-static brotli-static \
-    # Dev headers
-    libogg-dev libvorbis-dev libtheora-dev \
-    libwebp-dev freetype-dev \
-    aom-dev openssl-dev zlib-dev \
-    brotli-dev libpng-dev
+    autoconf automake bash brotli-static bzip2 bzip2-dev bzip2-static build-base cmake curl curl-dev curl-static diffutils \
+    expat-dev expat-static findutils fontconfig-dev fontconfig-static freetype-dev freetype-static \
+    fribidi-dev fribidi-static gawk gcc gcompat gettext-static giflib-dev git glib-dev glib-static \
+    graphite2-dev graphite2-static grep harfbuzz-dev harfbuzz-static jq lame-dev libedit-dev libffi-dev \
+    libjpeg-turbo-dev libjpeg-turbo-static libpng-dev libpng-static libssh2-dev libssh2-static libtheora-dev \
+    libtool libuv-dev libwebp-dev libwebp-static libxml2-dev libxml2-static linux-headers lz4-dev \
+    lz4-static make meson mpc1 mpfr-dev musl-dev nasm ncurses-dev ninja nghttp2-dev nghttp2-static \
+    oniguruma-dev openssl-dev openssl-libs-static patch pcre-dev perl pkgconf python3 rsync sed \
+    sqlite-dev sqlite-static tar texinfo tiff-dev util-linux-dev wget x264-dev xz xz-dev xz-static \
+    yaml-dev yaml-static yasm zlib-dev zlib-static zstd-dev zstd-static aom-dev c-ares-dev
 
-ENV PREFIX=/opt/deps/amd64
-RUN mkdir -p ${PREFIX} /build
-WORKDIR /build
+RUN ln -sfn /usr/bin/python3 /usr/bin/python
 
-# x264
-RUN git clone --depth 1 https://code.videolan.org/videolan/x264.git && cd x264 && \
-    ./configure --prefix=${PREFIX} --enable-static --disable-cli && \
-    make -j$(nproc) && make install && cd .. && rm -rf x264
+RUN mkdir -p /opt/sysroots/aarch64 && \
+    cd /opt && \
+    wget -q "https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--musl--stable-${BOOTLIN_VERSION}.tar.bz2" && \
+    tar xjf "aarch64--musl--stable-${BOOTLIN_VERSION}.tar.bz2" && \
+    mv "aarch64--musl--stable-${BOOTLIN_VERSION}" aarch64-linux-musl && \
+    rm -f "aarch64--musl--stable-${BOOTLIN_VERSION}.tar.bz2" && \
+    cd /opt/aarch64-linux-musl/bin && \
+    for tool in gcc g++; do \
+        rm -f aarch64-linux-$tool && \
+        printf '#!/bin/sh\nexec /opt/aarch64-linux-musl/bin/aarch64-buildroot-linux-musl-'$tool'.br_real "$@"\n' > aarch64-linux-$tool && \
+        chmod +x aarch64-linux-$tool; \
+    done && \
+    for tool in ar strip ranlib; do \
+        rm -f aarch64-linux-$tool && \
+        ln -sf aarch64-buildroot-linux-musl-$tool aarch64-linux-$tool; \
+    done && \
+    mkdir -p /opt/aarch64-linux-musl/lib && \
+    ln -sf /usr/lib/libgmp.so.10 /opt/aarch64-linux-musl/lib/libgmp.so.10 && \
+    ln -sf /usr/lib/libgmp.so.10 /opt/aarch64-linux-musl/lib/libgmp.so && \
+    ln -sf /usr/lib/libmpfr.so.6 /opt/aarch64-linux-musl/lib/libmpfr.so.6 && \
+    ln -sf /usr/lib/libmpfr.so.6 /opt/aarch64-linux-musl/lib/libmpfr.so && \
+    ln -sf /usr/lib/libmpc.so.3 /opt/aarch64-linux-musl/lib/libmpc.so.3 && \
+    ln -sf /usr/lib/libmpc.so.3 /opt/aarch64-linux-musl/lib/libmpc.so && \
+    mkdir -p /opt/sysroots/aarch64/etc/apk /opt/sysroots/aarch64/etc/apk/keys && \
+    cp /etc/apk/repositories /opt/sysroots/aarch64/etc/apk/repositories && \
+    cp /etc/apk/keys/* /opt/sysroots/aarch64/etc/apk/keys/ && \
+    apk --root /opt/sysroots/aarch64 \
+        --arch aarch64 \
+        --keys-dir /opt/sysroots/aarch64/etc/apk/keys \
+        --repositories-file /opt/sysroots/aarch64/etc/apk/repositories \
+        --allow-untrusted \
+        --initdb add --no-cache \
+        musl-dev zlib-dev zlib-static bzip2-dev bzip2-static xz-dev xz-static \
+        openssl-dev openssl-libs-static libpng-dev libpng-static libjpeg-turbo-dev giflib-dev \
+        libwebp-dev libwebp-static tiff-dev lame-dev libtheora-dev x264-dev aom-dev \
+        freetype-dev freetype-static fontconfig-dev fontconfig-static fribidi-dev fribidi-static \
+        harfbuzz-dev harfbuzz-static glib-dev glib-static graphite2-dev graphite2-static \
+        brotli-static gettext-static curl-dev curl-static c-ares-dev nghttp2-dev nghttp2-static \
+        libssh2-dev libssh2-static sqlite-dev sqlite-static yaml-dev yaml-static expat-dev \
+        expat-static libxml2-dev libxml2-static && \
+    mkdir -p /opt/sysroots/aarch64/opt/deps && \
+    ln -sfn /opt/deps/arm64 /opt/sysroots/aarch64/opt/deps/arm64
 
-# opus
-RUN wget -q "https://downloads.xiph.org/releases/opus/opus-1.4.tar.gz" && \
-    tar xzf opus-*.tar.gz && cd opus-*/ && \
-    ./configure --prefix=${PREFIX} --disable-shared --enable-static && \
-    make -j$(nproc) && make install && cd .. && rm -rf opus-*/
+COPY <<'EOF' /usr/local/bin/build-static-deps
+#!/bin/sh
+set -eu
 
-# lame
-RUN wget -q "https://sourceforge.net/projects/lame/files/lame/3.100/lame-3.100.tar.gz/download" -O lame.tar.gz && \
-    tar xzf lame.tar.gz && cd lame-*/ && \
-    ./configure --prefix=${PREFIX} --disable-shared --enable-static --enable-nasm --disable-frontend && \
-    make -j$(nproc) && make install && cd .. && rm -rf lame-*/
+NPROC="$(nproc)"
+SRC_DIR=/opt/src
+BUILD_ROOT=/opt/build-static
+CROSS_FILE=/opt/cross/aarch64-linux.meson
 
-# libvpx
-RUN wget -q "https://github.com/webmproject/libvpx/archive/refs/tags/v1.14.0.tar.gz" -O libvpx.tar.gz && \
-    tar xzf libvpx.tar.gz && cd libvpx-*/ && \
-    ./configure --prefix=${PREFIX} --disable-shared --enable-static \
-        --disable-examples --disable-unit-tests --enable-vp9-highbitdepth && \
-    make -j$(nproc) && make install && cd .. && rm -rf libvpx-*/
+export PATH=${PATH}:/opt/aarch64-linux-musl/bin
+export MAKEFLAGS="-j${NPROC}"
+
+HOST_TRIPLET="$(gcc -dumpmachine)"
+TARGET_TRIPLET="$(aarch64-linux-gcc -dumpmachine)"
+
+mkdir -p "${SRC_DIR}" "${BUILD_ROOT}" /opt/cross /opt/deps/amd64 /opt/deps/arm64
+
+cat > "${CROSS_FILE}" <<'MESON'
+[binaries]
+c = 'aarch64-linux-gcc'
+cpp = 'aarch64-linux-g++'
+ar = 'aarch64-linux-ar'
+strip = 'aarch64-linux-strip'
+ranlib = 'aarch64-linux-ranlib'
+pkgconfig = 'pkg-config'
+nasm = 'nasm'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+MESON
+
+clean_tree() {
+    rm -rf "$1" "$2"
+}
+
+download_extract() {
+    archive="$1"
+    url="$2"
+    cd "${SRC_DIR}"
+    rm -f "${archive}"
+    wget -q -O "${archive}" "${url}"
+    case "${archive}" in
+        *.tar.gz|*.tgz) tar xzf "${archive}" ;;
+        *.tar.xz) tar xJf "${archive}" ;;
+        *.tar.bz2) tar xjf "${archive}" ;;
+        *) echo "unsupported archive: ${archive}" >&2; exit 1 ;;
+    esac
+}
+
+set_native_pkg_config() {
+    export PKG_CONFIG_PATH=/opt/deps/amd64/lib/pkgconfig
+    export PKG_CONFIG_LIBDIR=/opt/deps/amd64/lib/pkgconfig:/usr/lib/pkgconfig:/usr/local/lib/pkgconfig:/usr/share/pkgconfig
+    unset PKG_CONFIG_SYSROOT_DIR
+    unset PKG_CONFIG_ALLOW_CROSS
+}
+
+set_cross_pkg_config() {
+    export PKG_CONFIG_PATH=/opt/deps/arm64/lib/pkgconfig
+    export PKG_CONFIG_LIBDIR=/opt/deps/arm64/lib/pkgconfig:/opt/sysroots/aarch64/usr/lib/pkgconfig:/opt/sysroots/aarch64/usr/share/pkgconfig
+    export PKG_CONFIG_SYSROOT_DIR=/opt/sysroots/aarch64
+    export PKG_CONFIG_ALLOW_CROSS=1
+}
+
+cmake_native() {
+    src="$1"
+    build="$2"
+    shift 2
+    cmake -S "${src}" -B "${build}" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/deps/amd64 \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        "$@"
+    cmake --build "${build}" --parallel "${NPROC}"
+    cmake --install "${build}"
+}
+
+cmake_cross() {
+    src="$1"
+    build="$2"
+    shift 2
+    cmake -S "${src}" -B "${build}" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+        -DCMAKE_INSTALL_PREFIX=/opt/deps/arm64 \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DCMAKE_C_COMPILER=aarch64-linux-gcc \
+        -DCMAKE_CXX_COMPILER=aarch64-linux-g++ \
+        -DCMAKE_ASM_COMPILER=aarch64-linux-gcc \
+        "$@"
+    cmake --build "${build}" --parallel "${NPROC}"
+    cmake --install "${build}"
+}
+
+find_archive() {
+    find "$1" -name "$2" -print -quit
+}
+
+stage_archive() {
+    install -Dm644 "$1" "$2"
+}
+
+# libogg
+clean_tree "${SRC_DIR}/libogg-${LIBOGG_VERSION}" "${SRC_DIR}/libogg-${LIBOGG_VERSION}-arm64"
+download_extract libogg.tar.gz "https://downloads.xiph.org/releases/ogg/libogg-${LIBOGG_VERSION}.tar.gz"
+cp -a "${SRC_DIR}/libogg-${LIBOGG_VERSION}" "${SRC_DIR}/libogg-${LIBOGG_VERSION}-arm64"
+set_native_pkg_config
+cmake_native "${SRC_DIR}/libogg-${LIBOGG_VERSION}" "${BUILD_ROOT}/libogg-amd64" -DBUILD_SHARED_LIBS=OFF
+stage_archive "$(find_archive "${BUILD_ROOT}/libogg-amd64" libogg.a)" /opt/deps/amd64/lib/libogg.a
+set_cross_pkg_config
+cmake_cross "${SRC_DIR}/libogg-${LIBOGG_VERSION}-arm64" "${BUILD_ROOT}/libogg-arm64" -DBUILD_SHARED_LIBS=OFF
+stage_archive "$(find_archive "${BUILD_ROOT}/libogg-arm64" libogg.a)" /opt/deps/arm64/lib/libogg.a
+rm -rf "${SRC_DIR}/libogg-${LIBOGG_VERSION}" "${SRC_DIR}/libogg-${LIBOGG_VERSION}-arm64" "${SRC_DIR}/libogg.tar.gz"
+
+# libvorbis
+clean_tree "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}" "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}-arm64"
+download_extract libvorbis.tar.xz "https://downloads.xiph.org/releases/vorbis/libvorbis-${LIBVORBIS_VERSION}.tar.xz"
+cp -a "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}" "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}-arm64"
+set_native_pkg_config
+cd "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}"
+./configure \
+    --prefix=/opt/deps/amd64 \
+    --enable-static \
+    --disable-shared
+make
+make install
+stage_archive "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}/lib/.libs/libvorbis.a" /opt/deps/amd64/lib/libvorbis.a
+stage_archive "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}/lib/.libs/libvorbisenc.a" /opt/deps/amd64/lib/libvorbisenc.a
+stage_archive "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}/lib/.libs/libvorbisfile.a" /opt/deps/amd64/lib/libvorbisfile.a
+set_cross_pkg_config
+cd "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}-arm64"
+cp /usr/share/automake-*/config.sub .
+CC=aarch64-linux-gcc ./configure \
+    --build="${HOST_TRIPLET}" \
+    --host="${TARGET_TRIPLET}" \
+    --prefix=/opt/deps/arm64 \
+    --enable-static \
+    --disable-shared
+make
+make install
+stage_archive "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}-arm64/lib/.libs/libvorbis.a" /opt/deps/arm64/lib/libvorbis.a
+stage_archive "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}-arm64/lib/.libs/libvorbisenc.a" /opt/deps/arm64/lib/libvorbisenc.a
+stage_archive "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}-arm64/lib/.libs/libvorbisfile.a" /opt/deps/arm64/lib/libvorbisfile.a
+rm -rf "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}" "${SRC_DIR}/libvorbis-${LIBVORBIS_VERSION}-arm64" "${SRC_DIR}/libvorbis.tar.xz"
 
 # fdk-aac
-RUN wget -q "https://github.com/mstorsjo/fdk-aac/archive/refs/tags/v2.0.2.tar.gz" -O fdk-aac.tar.gz && \
-    tar xzf fdk-aac.tar.gz && cd fdk-aac-*/ && \
-    autoreconf -fi && ./configure --prefix=${PREFIX} --disable-shared --enable-static && \
-    make -j$(nproc) && make install && cd .. && rm -rf fdk-aac-*/
+clean_tree "${SRC_DIR}/fdk-aac-${FDK_AAC_VERSION}" "${SRC_DIR}/fdk-aac-${FDK_AAC_VERSION}-arm64"
+download_extract fdk-aac.tar.gz "https://github.com/mstorsjo/fdk-aac/archive/refs/tags/v${FDK_AAC_VERSION}.tar.gz"
+cp -a "${SRC_DIR}/fdk-aac-${FDK_AAC_VERSION}" "${SRC_DIR}/fdk-aac-${FDK_AAC_VERSION}-arm64"
+set_native_pkg_config
+cmake_native "${SRC_DIR}/fdk-aac-${FDK_AAC_VERSION}" "${BUILD_ROOT}/fdk-aac-amd64" -DBUILD_SHARED_LIBS=OFF
+stage_archive "$(find_archive "${BUILD_ROOT}/fdk-aac-amd64" libfdk-aac.a)" /opt/deps/amd64/lib/libfdk-aac.a
+set_cross_pkg_config
+cmake_cross "${SRC_DIR}/fdk-aac-${FDK_AAC_VERSION}-arm64" "${BUILD_ROOT}/fdk-aac-arm64" -DBUILD_SHARED_LIBS=OFF
+stage_archive "$(find_archive "${BUILD_ROOT}/fdk-aac-arm64" libfdk-aac.a)" /opt/deps/arm64/lib/libfdk-aac.a
+rm -rf "${SRC_DIR}/fdk-aac-${FDK_AAC_VERSION}" "${SRC_DIR}/fdk-aac-${FDK_AAC_VERSION}-arm64" "${SRC_DIR}/fdk-aac.tar.gz"
 
-RUN rm -rf /build/*
+# opus
+clean_tree "${SRC_DIR}/opus-${OPUS_VERSION}" "${SRC_DIR}/opus-${OPUS_VERSION}-arm64"
+download_extract opus.tar.gz "https://downloads.xiph.org/releases/opus/opus-${OPUS_VERSION}.tar.gz"
+cp -a "${SRC_DIR}/opus-${OPUS_VERSION}" "${SRC_DIR}/opus-${OPUS_VERSION}-arm64"
+set_native_pkg_config
+cd "${SRC_DIR}/opus-${OPUS_VERSION}"
+CFLAGS=-O2 CPPFLAGS=-O2 ./configure \
+    --prefix=/opt/deps/amd64 \
+    --enable-static \
+    --disable-shared \
+    --disable-extra-programs
+make
+make install
+stage_archive "${SRC_DIR}/opus-${OPUS_VERSION}/.libs/libopus.a" /opt/deps/amd64/lib/libopus.a
+set_cross_pkg_config
+cd "${SRC_DIR}/opus-${OPUS_VERSION}-arm64"
+CC=aarch64-linux-gcc CFLAGS=-O2 CPPFLAGS=-O2 ./configure \
+    --build="${HOST_TRIPLET}" \
+    --host="${TARGET_TRIPLET}" \
+    --prefix=/opt/deps/arm64 \
+    --enable-static \
+    --disable-shared \
+    --disable-extra-programs
+make
+make install
+stage_archive "${SRC_DIR}/opus-${OPUS_VERSION}-arm64/.libs/libopus.a" /opt/deps/arm64/lib/libopus.a
+rm -rf "${SRC_DIR}/opus-${OPUS_VERSION}" "${SRC_DIR}/opus-${OPUS_VERSION}-arm64" "${SRC_DIR}/opus.tar.gz"
 
-# Build script
+# dav1d
+clean_tree "${SRC_DIR}/dav1d-${DAV1D_VERSION}" "${SRC_DIR}/dav1d-${DAV1D_VERSION}-arm64"
+download_extract dav1d.tar.bz2 "https://code.videolan.org/videolan/dav1d/-/archive/${DAV1D_VERSION}/dav1d-${DAV1D_VERSION}.tar.bz2"
+cp -a "${SRC_DIR}/dav1d-${DAV1D_VERSION}" "${SRC_DIR}/dav1d-${DAV1D_VERSION}-arm64"
+set_native_pkg_config
+meson setup "${BUILD_ROOT}/dav1d-amd64" "${SRC_DIR}/dav1d-${DAV1D_VERSION}" \
+    --buildtype=release \
+    --prefix=/opt/deps/amd64 \
+    --libdir=lib \
+    --default-library=static \
+    -Denable_asm=true \
+    -Denable_tools=false \
+    -Denable_tests=false \
+    -Dfuzzing_engine=none \
+    -Dtestdata_tests=false
+ninja -C "${BUILD_ROOT}/dav1d-amd64"
+ninja -C "${BUILD_ROOT}/dav1d-amd64" install
+stage_archive "${BUILD_ROOT}/dav1d-amd64/src/libdav1d.a" /opt/deps/amd64/lib/libdav1d.a
+set_cross_pkg_config
+meson setup "${BUILD_ROOT}/dav1d-arm64" "${SRC_DIR}/dav1d-${DAV1D_VERSION}-arm64" \
+    --cross-file "${CROSS_FILE}" \
+    --buildtype=release \
+    --prefix=/opt/deps/arm64 \
+    --libdir=lib \
+    --default-library=static \
+    -Denable_asm=true \
+    -Denable_tools=false \
+    -Denable_tests=false \
+    -Dfuzzing_engine=none \
+    -Dtestdata_tests=false
+ninja -C "${BUILD_ROOT}/dav1d-arm64"
+ninja -C "${BUILD_ROOT}/dav1d-arm64" install
+stage_archive "${BUILD_ROOT}/dav1d-arm64/src/libdav1d.a" /opt/deps/arm64/lib/libdav1d.a
+rm -rf "${SRC_DIR}/dav1d-${DAV1D_VERSION}" "${SRC_DIR}/dav1d-${DAV1D_VERSION}-arm64" "${SRC_DIR}/dav1d.tar.bz2"
+
+# vid.stab
+clean_tree "${SRC_DIR}/vid.stab-${VIDSTAB_VERSION}" "${SRC_DIR}/vid.stab-${VIDSTAB_VERSION}-arm64"
+download_extract vidstab.tar.gz "https://github.com/georgmartius/vid.stab/archive/refs/tags/v${VIDSTAB_VERSION}.tar.gz"
+cp -a "${SRC_DIR}/vid.stab-${VIDSTAB_VERSION}" "${SRC_DIR}/vid.stab-${VIDSTAB_VERSION}-arm64"
+set_native_pkg_config
+cmake_native "${SRC_DIR}/vid.stab-${VIDSTAB_VERSION}" "${BUILD_ROOT}/vidstab-amd64" -DBUILD_SHARED_LIBS=OFF -DUSE_OMP=OFF
+stage_archive "$(find_archive "${BUILD_ROOT}/vidstab-amd64" libvidstab.a)" /opt/deps/amd64/lib/libvidstab.a
+set_cross_pkg_config
+cmake_cross "${SRC_DIR}/vid.stab-${VIDSTAB_VERSION}-arm64" "${BUILD_ROOT}/vidstab-arm64" -DBUILD_SHARED_LIBS=OFF -DUSE_OMP=OFF
+stage_archive "$(find_archive "${BUILD_ROOT}/vidstab-arm64" libvidstab.a)" /opt/deps/arm64/lib/libvidstab.a
+rm -rf "${SRC_DIR}/vid.stab-${VIDSTAB_VERSION}" "${SRC_DIR}/vid.stab-${VIDSTAB_VERSION}-arm64" "${SRC_DIR}/vidstab.tar.gz"
+
+# zimg
+clean_tree "${SRC_DIR}/zimg-release-${ZIMG_VERSION}" "${SRC_DIR}/zimg-release-${ZIMG_VERSION}-arm64"
+download_extract zimg.tar.gz "https://github.com/sekrit-twc/zimg/archive/release-${ZIMG_VERSION}.tar.gz"
+cp -a "${SRC_DIR}/zimg-release-${ZIMG_VERSION}" "${SRC_DIR}/zimg-release-${ZIMG_VERSION}-arm64"
+set_native_pkg_config
+cd "${SRC_DIR}/zimg-release-${ZIMG_VERSION}"
+autoreconf -fiv
+CFLAGS=-O2 CXXFLAGS=-O2 ./configure \
+    --prefix=/opt/deps/amd64 \
+    --enable-static \
+    --disable-shared
+make
+make install
+stage_archive "$(find_archive "${SRC_DIR}/zimg-release-${ZIMG_VERSION}" libzimg.a)" /opt/deps/amd64/lib/libzimg.a
+set_cross_pkg_config
+cd "${SRC_DIR}/zimg-release-${ZIMG_VERSION}-arm64"
+autoreconf -fiv
+CC=aarch64-linux-gcc CXX=aarch64-linux-g++ AR=aarch64-linux-ar CFLAGS=-O2 CXXFLAGS=-O2 ./configure \
+    --build="${HOST_TRIPLET}" \
+    --host="${TARGET_TRIPLET}" \
+    --prefix=/opt/deps/arm64 \
+    --enable-static \
+    --disable-shared
+make
+make install
+stage_archive "$(find_archive "${SRC_DIR}/zimg-release-${ZIMG_VERSION}-arm64" libzimg.a)" /opt/deps/arm64/lib/libzimg.a
+rm -rf "${SRC_DIR}/zimg-release-${ZIMG_VERSION}" "${SRC_DIR}/zimg-release-${ZIMG_VERSION}-arm64" "${SRC_DIR}/zimg.tar.gz"
+
+# SVT-AV1
+clean_tree "${SRC_DIR}/SVT-AV1-v${SVT_AV1_VERSION}" "${SRC_DIR}/SVT-AV1-v${SVT_AV1_VERSION}-arm64"
+download_extract svt-av1.tar.bz2 "https://gitlab.com/AOMediaCodec/SVT-AV1/-/archive/v${SVT_AV1_VERSION}/SVT-AV1-v${SVT_AV1_VERSION}.tar.bz2"
+cp -a "${SRC_DIR}/SVT-AV1-v${SVT_AV1_VERSION}" "${SRC_DIR}/SVT-AV1-v${SVT_AV1_VERSION}-arm64"
+set_native_pkg_config
+LDFLAGS='-Wl,-z,stack-size=1048576' cmake_native "${SRC_DIR}/SVT-AV1-v${SVT_AV1_VERSION}" "${BUILD_ROOT}/svt-av1-amd64" -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF
+set_cross_pkg_config
+LDFLAGS='-Wl,-z,stack-size=1048576' cmake_cross "${SRC_DIR}/SVT-AV1-v${SVT_AV1_VERSION}-arm64" "${BUILD_ROOT}/svt-av1-arm64" -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF
+rm -rf "${SRC_DIR}/SVT-AV1-v${SVT_AV1_VERSION}" "${SRC_DIR}/SVT-AV1-v${SVT_AV1_VERSION}-arm64" "${SRC_DIR}/svt-av1.tar.bz2"
+
+# libvpx
+clean_tree "${SRC_DIR}/libvpx-${LIBVPX_VERSION}" "${SRC_DIR}/libvpx-${LIBVPX_VERSION}-arm64"
+download_extract libvpx.tar.gz "https://github.com/webmproject/libvpx/archive/v${LIBVPX_VERSION}/libvpx-v${LIBVPX_VERSION}.tar.gz"
+cp -a "${SRC_DIR}/libvpx-${LIBVPX_VERSION}" "${SRC_DIR}/libvpx-${LIBVPX_VERSION}-arm64"
+set_native_pkg_config
+cd "${SRC_DIR}/libvpx-${LIBVPX_VERSION}"
+./configure \
+    --prefix=/opt/deps/amd64 \
+    --disable-examples \
+    --disable-tools \
+    --disable-docs \
+    --disable-unit-tests \
+    --enable-vp8 \
+    --enable-vp9 \
+    --enable-vp9-highbitdepth \
+    --enable-multithread \
+    --enable-runtime-cpu-detect \
+    --enable-pic \
+    --disable-shared \
+    --enable-static
+make
+make install
+stage_archive "${SRC_DIR}/libvpx-${LIBVPX_VERSION}/libvpx.a" /opt/deps/amd64/lib/libvpx.a
+set_cross_pkg_config
+cd "${SRC_DIR}/libvpx-${LIBVPX_VERSION}-arm64"
+CROSS=aarch64-linux- ./configure \
+    --prefix=/opt/deps/arm64 \
+    --target=arm64-linux-gcc \
+    --disable-examples \
+    --disable-tools \
+    --disable-docs \
+    --disable-unit-tests \
+    --enable-vp8 \
+    --enable-vp9 \
+    --enable-vp9-highbitdepth \
+    --enable-multithread \
+    --enable-pic \
+    --disable-shared \
+    --enable-static
+make
+make install
+stage_archive "${SRC_DIR}/libvpx-${LIBVPX_VERSION}-arm64/libvpx.a" /opt/deps/arm64/lib/libvpx.a
+rm -rf "${SRC_DIR}/libvpx-${LIBVPX_VERSION}" "${SRC_DIR}/libvpx-${LIBVPX_VERSION}-arm64" "${SRC_DIR}/libvpx.tar.gz"
+
+# x264
+cd "${SRC_DIR}"
+clean_tree "${SRC_DIR}/x264-${X264_REF}" "${SRC_DIR}/x264-${X264_REF}-arm64"
+git clone --depth 1 --branch stable https://code.videolan.org/videolan/x264.git "${SRC_DIR}/x264-${X264_REF}"
+git -C "${SRC_DIR}/x264-${X264_REF}" checkout "${X264_REF}"
+cp -a "${SRC_DIR}/x264-${X264_REF}" "${SRC_DIR}/x264-${X264_REF}-arm64"
+set_native_pkg_config
+cd "${SRC_DIR}/x264-${X264_REF}"
+./configure \
+    --prefix=/opt/deps/amd64 \
+    --enable-static \
+    --disable-cli
+make
+make install-lib-static
+set_cross_pkg_config
+cd "${SRC_DIR}/x264-${X264_REF}-arm64"
+./configure \
+    --host="${TARGET_TRIPLET}" \
+    --cross-prefix=aarch64-linux- \
+    --sysroot=/opt/sysroots/aarch64 \
+    --prefix=/opt/deps/arm64 \
+    --enable-static \
+    --disable-cli
+make
+make install-lib-static
+rm -rf "${SRC_DIR}/x264-${X264_REF}" "${SRC_DIR}/x264-${X264_REF}-arm64"
+
+# x265
+clean_tree "${SRC_DIR}/x265_${X265_VERSION}" "${SRC_DIR}/x265_${X265_VERSION}-arm64"
+download_extract x265.tar.gz "https://bitbucket.org/multicoreware/x265_git/downloads/x265_${X265_VERSION}.tar.gz"
+cp -a "${SRC_DIR}/x265_${X265_VERSION}" "${SRC_DIR}/x265_${X265_VERSION}-arm64"
+set_native_pkg_config
+cmake -S "${SRC_DIR}/x265_${X265_VERSION}/source" -B "${BUILD_ROOT}/x265-12-amd64" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DHIGH_BIT_DEPTH=TRUE \
+    -DMAIN12=TRUE \
+    -DEXPORT_C_API=FALSE \
+    -DENABLE_CLI=FALSE \
+    -DENABLE_SHARED=FALSE \
+    -DENABLE_LIBNUMA=OFF \
+    -DCMAKE_ASM_NASM_FLAGS=-w-macro-params-legacy
+cmake --build "${BUILD_ROOT}/x265-12-amd64" --parallel "${NPROC}"
+cmake -S "${SRC_DIR}/x265_${X265_VERSION}/source" -B "${BUILD_ROOT}/x265-10-amd64" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DHIGH_BIT_DEPTH=TRUE \
+    -DEXPORT_C_API=FALSE \
+    -DENABLE_CLI=FALSE \
+    -DENABLE_SHARED=FALSE \
+    -DENABLE_LIBNUMA=OFF \
+    -DCMAKE_ASM_NASM_FLAGS=-w-macro-params-legacy
+cmake --build "${BUILD_ROOT}/x265-10-amd64" --parallel "${NPROC}"
+cmake -S "${SRC_DIR}/x265_${X265_VERSION}/source" -B "${BUILD_ROOT}/x265-main-amd64" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/opt/deps/amd64 \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DEXTRA_LIB='x265_main10.a;x265_main12.a' \
+    -DEXTRA_LINK_FLAGS=-L. \
+    -DLINKED_10BIT=TRUE \
+    -DLINKED_12BIT=TRUE \
+    -DENABLE_CLI=FALSE \
+    -DENABLE_SHARED=FALSE \
+    -DENABLE_LIBNUMA=OFF \
+    -DCMAKE_ASM_NASM_FLAGS=-w-macro-params-legacy
+ln -sf ../x265-10-amd64/libx265.a "${BUILD_ROOT}/x265-main-amd64/libx265_main10.a"
+ln -sf ../x265-12-amd64/libx265.a "${BUILD_ROOT}/x265-main-amd64/libx265_main12.a"
+cmake --build "${BUILD_ROOT}/x265-main-amd64" --parallel "${NPROC}"
+cmake --install "${BUILD_ROOT}/x265-main-amd64"
+sed -i 's/ -lgcc_s -lgcc -lgcc_s -lgcc//g' /opt/deps/amd64/lib/pkgconfig/x265.pc
+mkdir -p "${BUILD_ROOT}/x265-merged-amd64"
+(
+    cd "${BUILD_ROOT}/x265-merged-amd64"
+    printf 'CREATE libx265.a\nADDLIB %s\nADDLIB %s\nADDLIB %s\nSAVE\nEND\n' \
+        "${BUILD_ROOT}/x265-main-amd64/libx265.a" \
+        "${BUILD_ROOT}/x265-10-amd64/libx265.a" \
+        "${BUILD_ROOT}/x265-12-amd64/libx265.a" | ar -M
+)
+ranlib "${BUILD_ROOT}/x265-merged-amd64/libx265.a"
+stage_archive "${BUILD_ROOT}/x265-merged-amd64/libx265.a" /opt/deps/amd64/lib/libx265.a
+set_cross_pkg_config
+cmake -S "${SRC_DIR}/x265_${X265_VERSION}-arm64/source" -B "${BUILD_ROOT}/x265-12-arm64" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_SYSTEM_NAME=Linux \
+    -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+    -DCMAKE_C_COMPILER=aarch64-linux-gcc \
+    -DCMAKE_CXX_COMPILER=aarch64-linux-g++ \
+    -DHIGH_BIT_DEPTH=TRUE \
+    -DMAIN12=TRUE \
+    -DEXPORT_C_API=FALSE \
+    -DENABLE_CLI=FALSE \
+    -DENABLE_SHARED=FALSE \
+    -DENABLE_ASSEMBLY=OFF \
+    -DENABLE_LIBNUMA=OFF
+cmake --build "${BUILD_ROOT}/x265-12-arm64" --parallel "${NPROC}"
+cmake -S "${SRC_DIR}/x265_${X265_VERSION}-arm64/source" -B "${BUILD_ROOT}/x265-10-arm64" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_SYSTEM_NAME=Linux \
+    -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+    -DCMAKE_C_COMPILER=aarch64-linux-gcc \
+    -DCMAKE_CXX_COMPILER=aarch64-linux-g++ \
+    -DHIGH_BIT_DEPTH=TRUE \
+    -DEXPORT_C_API=FALSE \
+    -DENABLE_CLI=FALSE \
+    -DENABLE_SHARED=FALSE \
+    -DENABLE_ASSEMBLY=OFF \
+    -DENABLE_LIBNUMA=OFF
+cmake --build "${BUILD_ROOT}/x265-10-arm64" --parallel "${NPROC}"
+cmake -S "${SRC_DIR}/x265_${X265_VERSION}-arm64/source" -B "${BUILD_ROOT}/x265-main-arm64" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_SYSTEM_NAME=Linux \
+    -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+    -DCMAKE_INSTALL_PREFIX=/opt/deps/arm64 \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_C_COMPILER=aarch64-linux-gcc \
+    -DCMAKE_CXX_COMPILER=aarch64-linux-g++ \
+    -DEXTRA_LIB='x265_main10.a;x265_main12.a' \
+    -DEXTRA_LINK_FLAGS=-L. \
+    -DLINKED_10BIT=TRUE \
+    -DLINKED_12BIT=TRUE \
+    -DENABLE_CLI=FALSE \
+    -DENABLE_SHARED=FALSE \
+    -DENABLE_ASSEMBLY=OFF \
+    -DENABLE_LIBNUMA=OFF
+ln -sf ../x265-10-arm64/libx265.a "${BUILD_ROOT}/x265-main-arm64/libx265_main10.a"
+ln -sf ../x265-12-arm64/libx265.a "${BUILD_ROOT}/x265-main-arm64/libx265_main12.a"
+cmake --build "${BUILD_ROOT}/x265-main-arm64" --parallel "${NPROC}"
+cmake --install "${BUILD_ROOT}/x265-main-arm64"
+sed -i 's/ -lgcc_s -lgcc -lgcc_s -lgcc//g' /opt/deps/arm64/lib/pkgconfig/x265.pc
+mkdir -p "${BUILD_ROOT}/x265-merged-arm64"
+(
+    cd "${BUILD_ROOT}/x265-merged-arm64"
+    printf 'CREATE libx265.a\nADDLIB %s\nADDLIB %s\nADDLIB %s\nSAVE\nEND\n' \
+        "${BUILD_ROOT}/x265-main-arm64/libx265.a" \
+        "${BUILD_ROOT}/x265-10-arm64/libx265.a" \
+        "${BUILD_ROOT}/x265-12-arm64/libx265.a" | /opt/aarch64-linux-musl/bin/aarch64-linux-ar -M
+)
+/opt/aarch64-linux-musl/bin/aarch64-linux-ranlib "${BUILD_ROOT}/x265-merged-arm64/libx265.a"
+stage_archive "${BUILD_ROOT}/x265-merged-arm64/libx265.a" /opt/deps/arm64/lib/libx265.a
+rm -rf "${SRC_DIR}/x265_${X265_VERSION}" "${SRC_DIR}/x265_${X265_VERSION}-arm64" "${SRC_DIR}/x265.tar.gz"
+
+# rubberband
+clean_tree "${SRC_DIR}/rubberband-${RUBBERBAND_VERSION}" "${SRC_DIR}/rubberband-${RUBBERBAND_VERSION}-arm64"
+download_extract rubberband.tar.bz2 "https://breakfastquay.com/files/releases/rubberband-${RUBBERBAND_VERSION}.tar.bz2"
+cp -a "${SRC_DIR}/rubberband-${RUBBERBAND_VERSION}" "${SRC_DIR}/rubberband-${RUBBERBAND_VERSION}-arm64"
+set_native_pkg_config
+meson setup "${BUILD_ROOT}/rubberband-amd64" "${SRC_DIR}/rubberband-${RUBBERBAND_VERSION}" \
+    --buildtype=release \
+    --prefix=/opt/deps/amd64 \
+    --libdir=lib \
+    --default-library=static \
+    -Dfft=builtin \
+    -Dresampler=builtin \
+    -Dcmdline=disabled \
+    -Dvamp=disabled \
+    -Dladspa=disabled \
+    -Dlv2=disabled \
+    -Dtests=disabled \
+    -Djni=disabled
+ninja -C "${BUILD_ROOT}/rubberband-amd64"
+ninja -C "${BUILD_ROOT}/rubberband-amd64" install
+stage_archive "$(find_archive "${BUILD_ROOT}/rubberband-amd64" librubberband.a)" /opt/deps/amd64/lib/librubberband.a
+set_cross_pkg_config
+meson setup "${BUILD_ROOT}/rubberband-arm64" "${SRC_DIR}/rubberband-${RUBBERBAND_VERSION}-arm64" \
+    --cross-file "${CROSS_FILE}" \
+    --buildtype=release \
+    --prefix=/opt/deps/arm64 \
+    --libdir=lib \
+    --default-library=static \
+    -Dfft=builtin \
+    -Dresampler=builtin \
+    -Dcmdline=disabled \
+    -Dvamp=disabled \
+    -Dladspa=disabled \
+    -Dlv2=disabled \
+    -Dtests=disabled \
+    -Djni=disabled
+ninja -C "${BUILD_ROOT}/rubberband-arm64"
+ninja -C "${BUILD_ROOT}/rubberband-arm64" install
+stage_archive "$(find_archive "${BUILD_ROOT}/rubberband-arm64" librubberband.a)" /opt/deps/arm64/lib/librubberband.a
+rm -rf "${SRC_DIR}/rubberband-${RUBBERBAND_VERSION}" "${SRC_DIR}/rubberband-${RUBBERBAND_VERSION}-arm64" "${SRC_DIR}/rubberband.tar.bz2"
+
+# brotli
+clean_tree "${SRC_DIR}/brotli-${BROTLI_VERSION}" "${SRC_DIR}/brotli-${BROTLI_VERSION}-arm64"
+download_extract brotli.tar.gz "https://github.com/google/brotli/archive/refs/tags/v${BROTLI_VERSION}.tar.gz"
+cp -a "${SRC_DIR}/brotli-${BROTLI_VERSION}" "${SRC_DIR}/brotli-${BROTLI_VERSION}-arm64"
+set_native_pkg_config
+cmake_native "${SRC_DIR}/brotli-${BROTLI_VERSION}" "${BUILD_ROOT}/brotli-amd64" \
+    -DBROTLI_DISABLE_TESTS=ON \
+    -DBUILD_SHARED_LIBS=OFF
+set_cross_pkg_config
+cmake_cross "${SRC_DIR}/brotli-${BROTLI_VERSION}-arm64" "${BUILD_ROOT}/brotli-arm64" \
+    -DBROTLI_DISABLE_TESTS=ON \
+    -DBUILD_SHARED_LIBS=OFF
+rm -rf "${SRC_DIR}/brotli-${BROTLI_VERSION}" "${SRC_DIR}/brotli-${BROTLI_VERSION}-arm64" "${SRC_DIR}/brotli.tar.gz"
+
+# harfbuzz
+clean_tree "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}-arm64"
+download_extract harfbuzz.tar.xz "https://github.com/harfbuzz/harfbuzz/releases/download/${HARFBUZZ_VERSION}/harfbuzz-${HARFBUZZ_VERSION}.tar.xz"
+cp -a "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}-arm64"
+set_native_pkg_config
+meson setup "${BUILD_ROOT}/harfbuzz-amd64" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" \
+    --buildtype=release \
+    --prefix=/opt/deps/amd64 \
+    --libdir=lib \
+    --default-library=static \
+    -Dcpp_std=c++11 \
+    -Dbenchmark=disabled \
+    -Dcairo=disabled \
+    -Ddocs=disabled \
+    -Dfreetype=enabled \
+    -Dglib=enabled \
+    -Dgobject=disabled \
+    -Dgraphite2=enabled \
+    -Dicu=disabled \
+    -Dintrospection=disabled \
+    -Dtests=disabled \
+    -Dutilities=disabled
+ninja -C "${BUILD_ROOT}/harfbuzz-amd64"
+ninja -C "${BUILD_ROOT}/harfbuzz-amd64" install
+set_cross_pkg_config
+meson setup "${BUILD_ROOT}/harfbuzz-arm64" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}-arm64" \
+    --cross-file "${CROSS_FILE}" \
+    --buildtype=release \
+    --prefix=/opt/deps/arm64 \
+    --libdir=lib \
+    --default-library=static \
+    -Dc_args=-Wno-error=redundant-decls \
+    -Dcpp_std=c++11 \
+    -Dcpp_args=-Wno-error=redundant-decls \
+    -Dbenchmark=disabled \
+    -Dcairo=disabled \
+    -Ddocs=disabled \
+    -Dfreetype=enabled \
+    -Dglib=enabled \
+    -Dgobject=disabled \
+    -Dgraphite2=enabled \
+    -Dicu=disabled \
+    -Dintrospection=disabled \
+    -Dtests=disabled \
+    -Dutilities=disabled
+ninja -C "${BUILD_ROOT}/harfbuzz-arm64"
+ninja -C "${BUILD_ROOT}/harfbuzz-arm64" install
+rm -rf "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}-arm64" "${SRC_DIR}/harfbuzz.tar.xz"
+
+# libass
+clean_tree "${SRC_DIR}/libass-${LIBASS_VERSION}" "${SRC_DIR}/libass-${LIBASS_VERSION}-arm64"
+download_extract libass.tar.xz "https://github.com/libass/libass/releases/download/${LIBASS_VERSION}/libass-${LIBASS_VERSION}.tar.xz"
+cp -a "${SRC_DIR}/libass-${LIBASS_VERSION}" "${SRC_DIR}/libass-${LIBASS_VERSION}-arm64"
+set_native_pkg_config
+cd "${SRC_DIR}/libass-${LIBASS_VERSION}"
+./configure \
+    --prefix=/opt/deps/amd64 \
+    --enable-static \
+    --disable-shared \
+    --disable-fontconfig \
+    --disable-enca \
+    --disable-libunibreak \
+    --disable-require-system-font-provider
+make
+make install
+set_cross_pkg_config
+cd "${SRC_DIR}/libass-${LIBASS_VERSION}-arm64"
+CFLAGS='-O2 -I/opt/sysroots/aarch64/usr/include' LDFLAGS='-L/opt/sysroots/aarch64/usr/lib' ./configure \
+    --host="${TARGET_TRIPLET}" \
+    --build="${HOST_TRIPLET}" \
+    --prefix=/opt/deps/arm64 \
+    --enable-static \
+    --disable-shared \
+    --disable-fontconfig \
+    --disable-enca \
+    --disable-libunibreak \
+    --disable-require-system-font-provider
+make
+make install
+rm -rf "${SRC_DIR}/libass-${LIBASS_VERSION}" "${SRC_DIR}/libass-${LIBASS_VERSION}-arm64" "${SRC_DIR}/libass.tar.xz"
+
+for libdir in /opt/deps/amd64 /opt/deps/arm64; do
+    find "${libdir}" -name '*.la' -delete
+    find "${libdir}" -type f -name '*.so' -delete
+    find "${libdir}" -type f -name '*.so.*' -delete
+done
+
+set_native_pkg_config
+for pc in x264 x265 vpx dav1d SvtAv1Enc fdk-aac opus ogg vorbis vidstab rubberband zimg harfbuzz libass; do
+    pkg-config --exists "${pc}"
+    pkg-config --static --libs "${pc}" >/dev/null
+    pkg-config --modversion "${pc}" >/dev/null
+done
+set_cross_pkg_config
+for pc in x264 x265 vpx dav1d SvtAv1Enc fdk-aac opus ogg vorbis vidstab rubberband zimg harfbuzz libass; do
+    pkg-config --exists "${pc}"
+    pkg-config --static --libs "${pc}" >/dev/null
+    pkg-config --modversion "${pc}" >/dev/null
+done
+
+cat > "${BUILD_ROOT}/fontconfig-test.c" <<'FC_EOF'
+#include <fontconfig/fontconfig.h>
+int main(void) { return FcInit() ? 0 : 1; }
+FC_EOF
+
+set_native_pkg_config
+gcc "${BUILD_ROOT}/fontconfig-test.c" \
+    -o "${BUILD_ROOT}/fontconfig-test-amd64" \
+    $(pkg-config --static --cflags --libs fontconfig)
+
+set_cross_pkg_config
+aarch64-linux-gcc --sysroot=/opt/sysroots/aarch64 "${BUILD_ROOT}/fontconfig-test.c" \
+    -o "${BUILD_ROOT}/fontconfig-test-arm64" \
+    $(pkg-config --static --cflags --libs fontconfig)
+
+cat > "${BUILD_ROOT}/x264-test.c" <<'X264_EOF'
+#include <stdint.h>
+#include <x264.h>
+int main(void) { x264_param_t param; x264_param_default(&param); return 0; }
+X264_EOF
+
+set_native_pkg_config
+gcc "${BUILD_ROOT}/x264-test.c" \
+    -o "${BUILD_ROOT}/x264-test-amd64" \
+    $(pkg-config --static --cflags --libs x264)
+
+set_cross_pkg_config
+aarch64-linux-gcc --sysroot=/opt/sysroots/aarch64 "${BUILD_ROOT}/x264-test.c" \
+    -o "${BUILD_ROOT}/x264-test-arm64" \
+    $(pkg-config --static --cflags --libs x264)
+
+cat > "${BUILD_ROOT}/harfbuzz-test.c" <<'HARFBUZZ_EOF'
+#include <hb.h>
+int main(void) {
+    hb_buffer_t *buffer = hb_buffer_create();
+    hb_buffer_destroy(buffer);
+    return 0;
+}
+HARFBUZZ_EOF
+
+set_native_pkg_config
+gcc "${BUILD_ROOT}/harfbuzz-test.c" \
+    -o "${BUILD_ROOT}/harfbuzz-test-amd64" \
+    $(pkg-config --static --cflags --libs harfbuzz)
+
+set_cross_pkg_config
+aarch64-linux-gcc --sysroot=/opt/sysroots/aarch64 "${BUILD_ROOT}/harfbuzz-test.c" \
+    -o "${BUILD_ROOT}/harfbuzz-test-arm64" \
+    $(pkg-config --static --cflags --libs harfbuzz)
+
+rm -rf "${SRC_DIR}" "${BUILD_ROOT}"
+EOF
+
+RUN chmod +x /usr/local/bin/build-static-deps && /usr/local/bin/build-static-deps && rm -f /usr/local/bin/build-static-deps
+
+ENV PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
+    PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+
+WORKDIR /build
+
 COPY <<'EOF' /usr/local/bin/build-ffmpeg
 #!/bin/sh
-set -e
+set -eu
+
 ARCH="${1:-amd64}"
 FFMPEG_VERSION="${2:-}"
 
-[ "$ARCH" != "amd64" ] && echo "Only amd64 supported" && exit 1
+COMMON_FEATURE_FLAGS="
+    --enable-gpl
+    --enable-version3
+    --enable-nonfree
+    --enable-static
+    --disable-shared
+    --disable-debug
+    --disable-doc
+    --disable-ffplay
+    --enable-libx264
+    --enable-libx265
+    --enable-libvpx
+    --enable-libopus
+    --enable-libvorbis
+    --enable-libmp3lame
+    --enable-libfdk-aac
+    --enable-libaom
+    --enable-libdav1d
+    --enable-libsvtav1
+    --enable-libass
+    --enable-libfreetype
+    --enable-libfontconfig
+    --enable-libvidstab
+    --enable-librubberband
+    --enable-libzimg
+    --enable-openssl
+"
 
-[ -z "$FFMPEG_VERSION" ] && FFMPEG_VERSION=$(wget -qO- https://ffmpeg.org/releases/ | grep -oE 'ffmpeg-[0-9]+\.[0-9]+(\.[0-9]+)?' | sed 's/ffmpeg-//' | sort -V | tail -1)
+COMMON_EXTRA_LIBS='-lpthread -lm -lstdc++'
+COMMON_LINKER_FLAGS='-static -Wl,-z,stack-size=1048576'
 
-echo "Building FFmpeg ${FFMPEG_VERSION}..."
+case "$ARCH" in
+    amd64)
+        export CC=gcc
+        export CXX=g++
+        export AR=ar
+        export RANLIB=ranlib
+        export STRIP=strip
+        export PKG_CONFIG_PATH=/opt/deps/amd64/lib/pkgconfig
+        export PKG_CONFIG_LIBDIR=/opt/deps/amd64/lib/pkgconfig:/usr/lib/pkgconfig:/usr/local/lib/pkgconfig:/usr/share/pkgconfig
+        unset PKG_CONFIG_SYSROOT_DIR
+        unset PKG_CONFIG_ALLOW_CROSS
+        CROSS_FLAGS=''
+        EXTRA_CFLAGS='-O2 -I/opt/deps/amd64/include -static'
+        EXTRA_LDFLAGS="${COMMON_LINKER_FLAGS} -L/opt/deps/amd64/lib"
+        ;;
+    arm64)
+        export PATH="/opt/aarch64-linux-musl/bin:${PATH}"
+        export CC=/opt/aarch64-linux-musl/bin/aarch64-linux-gcc
+        export CXX=/opt/aarch64-linux-musl/bin/aarch64-linux-g++
+        export AR=/opt/aarch64-linux-musl/bin/aarch64-linux-ar
+        export RANLIB=/opt/aarch64-linux-musl/bin/aarch64-linux-ranlib
+        export STRIP=/opt/aarch64-linux-musl/bin/aarch64-linux-strip
+        export PKG_CONFIG_PATH=/opt/deps/arm64/lib/pkgconfig
+        export PKG_CONFIG_LIBDIR=/opt/deps/arm64/lib/pkgconfig:/opt/sysroots/aarch64/usr/lib/pkgconfig:/opt/sysroots/aarch64/usr/share/pkgconfig
+        export PKG_CONFIG_SYSROOT_DIR=/opt/sysroots/aarch64
+        export PKG_CONFIG_ALLOW_CROSS=1
+        CROSS_FLAGS='--enable-cross-compile --cross-prefix=/opt/aarch64-linux-musl/bin/aarch64-linux- --arch=aarch64 --target-os=linux --sysroot=/opt/sysroots/aarch64'
+        EXTRA_CFLAGS='-O2 -I/opt/deps/arm64/include -I/opt/sysroots/aarch64/usr/include'
+        EXTRA_LDFLAGS="${COMMON_LINKER_FLAGS} -L/opt/deps/arm64/lib -L/opt/sysroots/aarch64/usr/lib"
+        ;;
+    *)
+        echo "Unknown architecture: $ARCH" >&2
+        exit 1
+        ;;
+esac
+
+if [ -z "$FFMPEG_VERSION" ]; then
+    FFMPEG_VERSION=$(
+        wget -qO- https://ffmpeg.org/releases/ |
+            grep -oE 'ffmpeg-[0-9]+\.[0-9]+(\.[0-9]+)?' |
+            sed 's/ffmpeg-//' |
+            sort -V |
+            tail -1
+    )
+fi
+
+echo "Building FFmpeg ${FFMPEG_VERSION} for ${ARCH}..."
+sed -i 's/ -lgcc_s -lgcc -lgcc_s -lgcc//g' "/opt/deps/${ARCH}/lib/pkgconfig/x265.pc"
 cd /build
+rm -rf "ffmpeg-${FFMPEG_VERSION}" "ffmpeg-${FFMPEG_VERSION}.tar.xz" ffmpeg-install
 wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
-tar xJf ffmpeg-${FFMPEG_VERSION}.tar.xz && cd ffmpeg-${FFMPEG_VERSION}
+tar xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"
+cd "ffmpeg-${FFMPEG_VERSION}"
 
-export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/opt/deps/amd64/lib/pkgconfig"
+./configure \
+    --prefix=/build/ffmpeg-install \
+    ${COMMON_FEATURE_FLAGS} \
+    ${CROSS_FLAGS} \
+    --pkg-config=pkg-config \
+    --pkg-config-flags='--static' \
+    --extra-cflags="${EXTRA_CFLAGS}" \
+    --extra-ldflags="${EXTRA_LDFLAGS}" \
+    --extra-libs="${COMMON_EXTRA_LIBS}"
 
-./configure --prefix=/tmp/ffmpeg-install \
-    --enable-gpl --enable-version3 --enable-nonfree \
-    --enable-static --disable-shared --disable-debug --disable-doc --disable-ffplay \
-    --enable-libx264 --enable-libvpx --enable-libopus \
-    --enable-libvorbis --enable-libtheora --enable-libmp3lame --enable-libfdk-aac \
-    --enable-libfreetype --enable-libwebp --enable-libaom --enable-openssl \
-    --pkg-config-flags="--static" \
-    --extra-cflags="-I/usr/include -I/opt/deps/amd64/include" \
-    --extra-ldflags="-L/usr/lib -L/opt/deps/amd64/lib -static"
-
-make -j$(nproc)
-strip ffmpeg ffprobe
+make -j"$(nproc)"
+"${STRIP}" ffmpeg ffprobe
 
 mkdir -p /output
-cp ffmpeg /output/ffmpeg-linux-amd64
-cp ffprobe /output/ffprobe-linux-amd64
+cp ffmpeg "/output/ffmpeg-linux-${ARCH}"
+cp ffprobe "/output/ffprobe-linux-${ARCH}"
 echo "${FFMPEG_VERSION}" > /output/VERSION
-echo "Built: ffmpeg-linux-amd64, ffprobe-linux-amd64"
+echo "Built: ffmpeg-linux-${ARCH}, ffprobe-linux-${ARCH}"
 EOF
 
 RUN chmod +x /usr/local/bin/build-ffmpeg
+
 WORKDIR /workspace
-CMD ["echo", "Usage: build-ffmpeg [amd64]"]
+VOLUME ["/workspace", "/output"]
+CMD ["echo", "Usage: build-ffmpeg [amd64|arm64] [version]"]

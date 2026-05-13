@@ -1,0 +1,19 @@
+name: Build Environment Image
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'docker/Dockerfile.build'
+      - '.gitea/workflows/build-env-image.yml'
+  schedule:
+    - cron: '0 0 1 */3 *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build build environment image
+        run: docker build -f docker/Dockerfile.build -t local/ffmpeg:build .

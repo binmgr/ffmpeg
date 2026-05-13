@@ -1,13 +1,16 @@
-name: Build FFmpeg Static Binaries
+name: Build Linux Binaries
 
 on:
   push:
     branches: [main, master]
     paths:
-      - 'docker/**'
-      - '.github/workflows/build.yml'
+      - 'Dockerfile'
+      - '.github/workflows/build-binaries.yml'
   schedule:
-    - cron: '0 0 1 */3 *'
+    - cron: '0 0 1 * *'
+  workflow_run:
+    workflows: ['Build Environment Image']
+    types: [completed]
   workflow_dispatch:
     inputs:
       ffmpeg_version:
@@ -40,6 +43,17 @@ jobs:
   build:
     name: Build (${{ matrix.arch }})
     needs: get-version
+    if: >-
+      ${{
+        github.event_name != 'workflow_run' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          (
+            github.event.workflow_run.head_branch == 'main' ||
+            github.event.workflow_run.head_branch == 'master'
+          )
+        )
+      }}
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/binmgr/ffmpeg:build
@@ -62,10 +76,8 @@ jobs:
           path: |
             /output/ffmpeg-linux-${{ matrix.arch }}
             /output/ffprobe-linux-${{ matrix.arch }}
-          retention-days: 1
 
   release:
-    name: Release
     needs: [get-version, build]
     runs-on: ubuntu-latest
     permissions:
@@ -82,46 +94,28 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Get YYMM tag
+        id: yymm
+        run: echo "tag=$(date -u +'%y%m')" >> $GITHUB_OUTPUT
+
       - name: Prepare release
         run: |
           mkdir -p release
           cp artifacts/* release/
           chmod +x release/*
           cd release
-          sha256sum * > checksums.txt
-
-      - name: Delete existing release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release delete "${{ needs.get-version.outputs.tag }}" \
-            --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+          sha256sum * > SHA256SUMS.txt
 
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          gh release delete "${{ needs.get-version.outputs.tag }}" \
+            --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
           gh release create "${{ needs.get-version.outputs.tag }}" \
             --repo "${{ github.repository }}" \
             --title "FFmpeg ${{ needs.get-version.outputs.version }}" \
-            --notes "## FFmpeg ${{ needs.get-version.outputs.version }} Static Builds
-
-          Fully static FFmpeg binaries (musl libc).
-
-          | Platform | ffmpeg | ffprobe |
-          |----------|--------|---------|
-          | Linux AMD64 | \`ffmpeg-linux-amd64\` | \`ffprobe-linux-amd64\` |
-          | Linux ARM64 | \`ffmpeg-linux-arm64\` | \`ffprobe-linux-arm64\` |
-
-          ### Docker
-          \`\`\`bash
-          docker run --rm ghcr.io/binmgr/ffmpeg:latest -version
-          \`\`\`
-
-          ### Verify
-          \`\`\`bash
-          sha256sum -c checksums.txt
-          \`\`\`" \
+            --notes "Static FFmpeg binaries" \
             release/*
 
       - name: Set up Docker Buildx
@@ -150,3 +144,4 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.get-version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.yymm.outputs.tag }}
