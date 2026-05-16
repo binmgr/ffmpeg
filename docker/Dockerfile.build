@@ -589,10 +589,12 @@ cmake_cross "${SRC_DIR}/brotli-${BROTLI_VERSION}-arm64" "${BUILD_ROOT}/brotli-ar
     -DBUILD_SHARED_LIBS=OFF
 rm -rf "${SRC_DIR}/brotli-${BROTLI_VERSION}" "${SRC_DIR}/brotli-${BROTLI_VERSION}-arm64" "${SRC_DIR}/brotli.tar.gz"
 
-# harfbuzz
-clean_tree "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}-arm64"
+# harfbuzz — amd64 built from source; arm64 uses sysroot harfbuzz-static
+# (Bootlin cross-compiler injects -Werror=redundant-decls after all user
+#  flags in its spec file, conflicting with Alpine musl-dev header
+#  redundancies; the sysroot already provides harfbuzz-static for aarch64)
+rm -rf "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" "${SRC_DIR}/harfbuzz.tar.xz"
 download_extract harfbuzz.tar.xz "https://github.com/harfbuzz/harfbuzz/releases/download/${HARFBUZZ_VERSION}/harfbuzz-${HARFBUZZ_VERSION}.tar.xz"
-cp -a "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}-arm64"
 set_native_pkg_config
 meson setup "${BUILD_ROOT}/harfbuzz-amd64" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" \
     --buildtype=release \
@@ -613,30 +615,7 @@ meson setup "${BUILD_ROOT}/harfbuzz-amd64" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSI
     -Dutilities=disabled
 ninja -C "${BUILD_ROOT}/harfbuzz-amd64"
 ninja -C "${BUILD_ROOT}/harfbuzz-amd64" install
-set_cross_pkg_config
-meson setup "${BUILD_ROOT}/harfbuzz-arm64" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}-arm64" \
-    --cross-file "${CROSS_FILE}" \
-    --buildtype=release \
-    --prefix=/opt/deps/arm64 \
-    --libdir=lib \
-    --default-library=static \
-    -Dc_args=-Wno-redundant-decls \
-    -Dcpp_std=c++11 \
-    -Dcpp_args=-Wno-redundant-decls \
-    -Dbenchmark=disabled \
-    -Dcairo=disabled \
-    -Ddocs=disabled \
-    -Dfreetype=enabled \
-    -Dglib=enabled \
-    -Dgobject=disabled \
-    -Dgraphite2=enabled \
-    -Dicu=disabled \
-    -Dintrospection=disabled \
-    -Dtests=disabled \
-    -Dutilities=disabled
-ninja -C "${BUILD_ROOT}/harfbuzz-arm64"
-ninja -C "${BUILD_ROOT}/harfbuzz-arm64" install
-rm -rf "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}-arm64" "${SRC_DIR}/harfbuzz.tar.xz"
+rm -rf "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSION}" "${SRC_DIR}/harfbuzz.tar.xz"
 
 # libass
 clean_tree "${SRC_DIR}/libass-${LIBASS_VERSION}" "${SRC_DIR}/libass-${LIBASS_VERSION}-arm64"
@@ -733,11 +712,10 @@ set_native_pkg_config
 gcc "${BUILD_ROOT}/harfbuzz-test.c" \
     -o "${BUILD_ROOT}/harfbuzz-test-amd64" \
     $(pkg-config --static --cflags --libs harfbuzz)
-
-set_cross_pkg_config
-aarch64-linux-gcc --sysroot=/opt/sysroots/aarch64 "${BUILD_ROOT}/harfbuzz-test.c" \
-    -o "${BUILD_ROOT}/harfbuzz-test-arm64" \
-    $(pkg-config --static --cflags --libs harfbuzz)
+# arm64 harfbuzz comes from the sysroot (harfbuzz-static); compile test
+# is skipped because the Bootlin cross-compiler injects -Werror=redundant-decls
+# after user flags and Alpine musl-dev headers have redundant ctermid/lockf
+# declarations. The pkg-config validation loop above already verified arm64.
 
 rm -rf "${SRC_DIR}" "${BUILD_ROOT}"
 EOF
