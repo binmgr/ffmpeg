@@ -19,6 +19,9 @@ ARG X265_VERSION=3.6
 ARG BROTLI_VERSION=1.1.0
 ARG HARFBUZZ_VERSION=9.0.0
 ARG LIBASS_VERSION=0.17.3
+ARG LLVM_MINGW_VERSION=20241217
+ARG MACOS_SDK_VERSION=14.0
+ARG FREEBSD_VERSION=14.4
 
 RUN apk add --no-cache \
     autoconf automake bash brotli-static bzip2 bzip2-dev bzip2-static build-base cmake curl curl-dev curl-static diffutils \
@@ -30,7 +33,8 @@ RUN apk add --no-cache \
     lz4-static make meson mpc1 mpfr-dev musl-dev nasm ncurses-dev ninja nghttp2-dev nghttp2-static \
     oniguruma-dev openssl-dev openssl-libs-static patch pcre-dev perl pkgconf python3 rsync sed \
     sqlite-dev sqlite-static tar texinfo tiff-dev util-linux-dev wget x264-dev xz xz-dev xz-static \
-    yaml-dev yaml-static yasm zlib-dev zlib-static zstd-dev zstd-static aom-dev c-ares-dev
+    yaml-dev yaml-static yasm zlib-dev zlib-static zstd-dev zstd-static aom-dev c-ares-dev \
+    clang lld cpio mingw-w64-gcc
 
 RUN ln -sfn /usr/bin/python3 /usr/bin/python
 
@@ -743,6 +747,41 @@ EOF
 
 RUN chmod +x /usr/local/bin/build-static-deps && /usr/local/bin/build-static-deps && rm -f /usr/local/bin/build-static-deps
 
+# Windows arm64: llvm-mingw (Ubuntu binary; gcompat provides glibc compat on musl)
+RUN wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64.tar.xz" \
+    && tar xJf "llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64.tar.xz" -C /opt \
+    && mv "/opt/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64" /opt/llvm-mingw \
+    && rm "llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64.tar.xz"
+
+# macOS: osxcross + MacOSX SDK
+RUN git clone --depth 1 https://github.com/tpoechtrager/osxcross.git /opt/osxcross \
+    && mkdir -p /opt/osxcross/tarballs \
+    && wget -q "https://github.com/joseluisq/macosx-sdks/releases/download/${MACOS_SDK_VERSION}/MacOSX${MACOS_SDK_VERSION}.sdk.tar.xz" \
+         -O "/opt/osxcross/tarballs/MacOSX${MACOS_SDK_VERSION}.sdk.tar.xz" \
+    && cd /opt/osxcross && UNATTENDED=1 ./build.sh \
+    && rm -rf /opt/osxcross/tarballs /opt/osxcross/build
+
+# FreeBSD sysroots + clang wrapper scripts
+RUN mkdir -p /opt/freebsd-amd64 /opt/freebsd-arm64 \
+    && wget -q "https://download.freebsd.org/releases/amd64/amd64/${FREEBSD_VERSION}-RELEASE/base.txz" \
+         -O /tmp/freebsd-amd64-base.txz \
+    && tar xJf /tmp/freebsd-amd64-base.txz -C /opt/freebsd-amd64 ./lib ./usr/lib ./usr/include \
+    && rm /tmp/freebsd-amd64-base.txz \
+    && wget -q "https://download.freebsd.org/releases/arm64/aarch64/${FREEBSD_VERSION}-RELEASE/base.txz" \
+         -O /tmp/freebsd-arm64-base.txz \
+    && tar xJf /tmp/freebsd-arm64-base.txz -C /opt/freebsd-arm64 ./lib ./usr/lib ./usr/include \
+    && rm /tmp/freebsd-arm64-base.txz \
+    && printf '#!/bin/sh\nexec clang --target=x86_64-unknown-freebsd%s --sysroot=/opt/freebsd-amd64 "$@"\n' "${FREEBSD_VERSION}" \
+         > /usr/local/bin/freebsd-amd64-cc \
+    && printf '#!/bin/sh\nexec clang++ --target=x86_64-unknown-freebsd%s --sysroot=/opt/freebsd-amd64 "$@"\n' "${FREEBSD_VERSION}" \
+         > /usr/local/bin/freebsd-amd64-c++ \
+    && printf '#!/bin/sh\nexec clang --target=aarch64-unknown-freebsd%s --sysroot=/opt/freebsd-arm64 "$@"\n' "${FREEBSD_VERSION}" \
+         > /usr/local/bin/freebsd-arm64-cc \
+    && printf '#!/bin/sh\nexec clang++ --target=aarch64-unknown-freebsd%s --sysroot=/opt/freebsd-arm64 "$@"\n' "${FREEBSD_VERSION}" \
+         > /usr/local/bin/freebsd-arm64-c++ \
+    && chmod +x /usr/local/bin/freebsd-amd64-cc /usr/local/bin/freebsd-amd64-c++ \
+                /usr/local/bin/freebsd-arm64-cc /usr/local/bin/freebsd-arm64-c++
+
 ENV PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
     PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 
@@ -752,10 +791,10 @@ COPY <<'EOF' /usr/local/bin/build-ffmpeg
 #!/bin/sh
 set -eu
 
-ARCH="${1:-amd64}"
+TARGET="${1:-linux-amd64}"
 FFMPEG_VERSION="${2:-}"
 
-COMMON_FEATURE_FLAGS="
+LINUX_FEATURE_FLAGS="
     --enable-gpl
     --enable-version3
     --enable-nonfree
@@ -783,25 +822,38 @@ COMMON_FEATURE_FLAGS="
     --enable-openssl
 "
 
-COMMON_EXTRA_LIBS='-lpthread -lm -lstdc++'
-COMMON_LINKER_FLAGS='-static -Wl,-z,stack-size=1048576'
+BASIC_FEATURE_FLAGS="
+    --enable-gpl
+    --enable-version3
+    --enable-nonfree
+    --enable-static
+    --disable-shared
+    --disable-debug
+    --disable-doc
+    --disable-ffplay
+"
 
-case "$ARCH" in
-    amd64)
-        export CC=gcc
-        export CXX=g++
-        export AR=ar
-        export RANLIB=ranlib
-        export STRIP=strip
+EXTRA_LIBS=''
+LINUX_ARCH=''
+
+case "$TARGET" in
+    linux-amd64)
+        FEATURE_FLAGS="$LINUX_FEATURE_FLAGS"
+        LINUX_ARCH=amd64
+        export CC=gcc CXX=g++ AR=ar RANLIB=ranlib STRIP=strip
         export PKG_CONFIG_PATH=/opt/deps/amd64/lib/pkgconfig
         export PKG_CONFIG_LIBDIR=/opt/deps/amd64/lib/pkgconfig:/usr/lib/pkgconfig:/usr/local/lib/pkgconfig:/usr/share/pkgconfig
-        unset PKG_CONFIG_SYSROOT_DIR
-        unset PKG_CONFIG_ALLOW_CROSS
+        unset PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_ALLOW_CROSS
         CROSS_FLAGS=''
         EXTRA_CFLAGS='-O2 -I/opt/deps/amd64/include -static'
-        EXTRA_LDFLAGS="${COMMON_LINKER_FLAGS} -L/opt/deps/amd64/lib"
+        EXTRA_LDFLAGS='-static -Wl,-z,stack-size=1048576 -L/opt/deps/amd64/lib'
+        EXTRA_LIBS='-lpthread -lm -lstdc++'
+        STRIP_CMD=strip
+        EXT=''
         ;;
-    arm64)
+    linux-arm64)
+        FEATURE_FLAGS="$LINUX_FEATURE_FLAGS"
+        LINUX_ARCH=arm64
         export PATH="/opt/aarch64-linux-musl/bin:${PATH}"
         export CC=/opt/aarch64-linux-musl/bin/aarch64-linux-gcc
         export CXX=/opt/aarch64-linux-musl/bin/aarch64-linux-g++
@@ -814,10 +866,65 @@ case "$ARCH" in
         export PKG_CONFIG_ALLOW_CROSS=1
         CROSS_FLAGS='--enable-cross-compile --cross-prefix=/opt/aarch64-linux-musl/bin/aarch64-linux- --arch=aarch64 --target-os=linux --sysroot=/opt/sysroots/aarch64'
         EXTRA_CFLAGS='-O2 -I/opt/deps/arm64/include -I/opt/sysroots/aarch64/usr/include'
-        EXTRA_LDFLAGS="${COMMON_LINKER_FLAGS} -L/opt/deps/arm64/lib -L/opt/sysroots/aarch64/usr/lib"
+        EXTRA_LDFLAGS='-static -Wl,-z,stack-size=1048576 -L/opt/deps/arm64/lib -L/opt/sysroots/aarch64/usr/lib'
+        EXTRA_LIBS='-lpthread -lm -lstdc++'
+        STRIP_CMD=/opt/aarch64-linux-musl/bin/aarch64-linux-strip
+        EXT=''
+        ;;
+    windows-amd64)
+        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS"
+        CROSS_FLAGS='--enable-cross-compile --cross-prefix=x86_64-w64-mingw32- --arch=x86_64 --target-os=mingw32'
+        EXTRA_CFLAGS='-O2'
+        EXTRA_LDFLAGS='-static'
+        STRIP_CMD='x86_64-w64-mingw32-strip'
+        EXT='.exe'
+        ;;
+    windows-arm64)
+        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS"
+        export PATH="/opt/llvm-mingw/bin:${PATH}"
+        CROSS_FLAGS='--enable-cross-compile --cross-prefix=aarch64-w64-mingw32- --arch=aarch64 --target-os=mingw32'
+        EXTRA_CFLAGS='-O2'
+        EXTRA_LDFLAGS='-static'
+        STRIP_CMD='aarch64-w64-mingw32-strip'
+        EXT='.exe'
+        ;;
+    darwin-amd64)
+        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox"
+        export PATH="/opt/osxcross/target/bin:${PATH}"
+        CROSS_FLAGS='--enable-cross-compile --cross-prefix=x86_64-apple-darwin23- --arch=x86_64 --target-os=darwin --cc=x86_64-apple-darwin23-clang --cxx=x86_64-apple-darwin23-clang++'
+        EXTRA_CFLAGS='-O2'
+        EXTRA_LDFLAGS=''
+        STRIP_CMD='x86_64-apple-darwin23-strip'
+        EXT=''
+        ;;
+    darwin-arm64)
+        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox"
+        export PATH="/opt/osxcross/target/bin:${PATH}"
+        CROSS_FLAGS='--enable-cross-compile --cross-prefix=arm64-apple-darwin23- --arch=aarch64 --target-os=darwin --cc=arm64-apple-darwin23-clang --cxx=arm64-apple-darwin23-clang++'
+        EXTRA_CFLAGS='-O2'
+        EXTRA_LDFLAGS=''
+        STRIP_CMD='arm64-apple-darwin23-strip'
+        EXT=''
+        ;;
+    freebsd-amd64)
+        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS"
+        CROSS_FLAGS='--enable-cross-compile --arch=x86_64 --target-os=freebsd --sysroot=/opt/freebsd-amd64 --cc=freebsd-amd64-cc --cxx=freebsd-amd64-c++ --ld=ld.lld --disable-asm'
+        EXTRA_CFLAGS='-O2'
+        EXTRA_LDFLAGS='-static'
+        STRIP_CMD=':'
+        EXT=''
+        ;;
+    freebsd-arm64)
+        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS"
+        CROSS_FLAGS='--enable-cross-compile --arch=aarch64 --target-os=freebsd --sysroot=/opt/freebsd-arm64 --cc=freebsd-arm64-cc --cxx=freebsd-arm64-c++ --ld=ld.lld --disable-asm'
+        EXTRA_CFLAGS='-O2'
+        EXTRA_LDFLAGS='-static'
+        STRIP_CMD=':'
+        EXT=''
         ;;
     *)
-        echo "Unknown architecture: $ARCH" >&2
+        echo "Unknown target: $TARGET" >&2
+        echo "Targets: linux-amd64 linux-arm64 windows-amd64 windows-arm64 darwin-amd64 darwin-arm64 freebsd-amd64 freebsd-arm64" >&2
         exit 1
         ;;
 esac
@@ -832,36 +939,42 @@ if [ -z "$FFMPEG_VERSION" ]; then
     )
 fi
 
-echo "Building FFmpeg ${FFMPEG_VERSION} for ${ARCH}..."
-sed -i 's/ -lgcc_s -lgcc -lgcc_s -lgcc//g' "/opt/deps/${ARCH}/lib/pkgconfig/x265.pc"
+echo "Building FFmpeg ${FFMPEG_VERSION} for ${TARGET}..."
+
+if [ -n "$LINUX_ARCH" ]; then
+    sed -i 's/ -lgcc_s -lgcc -lgcc_s -lgcc//g' "/opt/deps/${LINUX_ARCH}/lib/pkgconfig/x265.pc"
+fi
+
 cd /build
-rm -rf "ffmpeg-${FFMPEG_VERSION}" "ffmpeg-${FFMPEG_VERSION}.tar.xz" ffmpeg-install
+rm -rf "ffmpeg-${FFMPEG_VERSION}" "ffmpeg-${FFMPEG_VERSION}.tar.xz"
 wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
 tar xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"
 cd "ffmpeg-${FFMPEG_VERSION}"
 
+# shellcheck disable=SC2086
 ./configure \
     --prefix=/build/ffmpeg-install \
-    ${COMMON_FEATURE_FLAGS} \
+    ${FEATURE_FLAGS} \
     ${CROSS_FLAGS} \
     --pkg-config=pkg-config \
     --pkg-config-flags='--static' \
     --extra-cflags="${EXTRA_CFLAGS}" \
     --extra-ldflags="${EXTRA_LDFLAGS}" \
-    --extra-libs="${COMMON_EXTRA_LIBS}"
+    ${EXTRA_LIBS:+--extra-libs="${EXTRA_LIBS}"} \
+    || { cat ffbuild/config.log; exit 1; }
 
 make -j"$(nproc)"
-"${STRIP}" ffmpeg ffprobe
+${STRIP_CMD} "ffmpeg${EXT}" "ffprobe${EXT}" 2>/dev/null || true
 
 mkdir -p /output
-cp ffmpeg "/output/ffmpeg-linux-${ARCH}"
-cp ffprobe "/output/ffprobe-linux-${ARCH}"
+cp "ffmpeg${EXT}"  "/output/ffmpeg-${TARGET}${EXT}"
+cp "ffprobe${EXT}" "/output/ffprobe-${TARGET}${EXT}"
 echo "${FFMPEG_VERSION}" > /output/VERSION
-echo "Built: ffmpeg-linux-${ARCH}, ffprobe-linux-${ARCH}"
+echo "Built: ffmpeg-${TARGET}${EXT}, ffprobe-${TARGET}${EXT}"
 EOF
 
 RUN chmod +x /usr/local/bin/build-ffmpeg
 
 WORKDIR /workspace
 VOLUME ["/workspace", "/output"]
-CMD ["echo", "Usage: build-ffmpeg [amd64|arm64] [version]"]
+CMD ["echo", "Usage: build-ffmpeg [linux-amd64|linux-arm64|windows-amd64|windows-arm64|darwin-amd64|darwin-arm64|freebsd-amd64|freebsd-arm64] [version]"]
