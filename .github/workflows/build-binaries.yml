@@ -126,7 +126,7 @@ jobs:
               cd /opt/osxcross && UNATTENDED=1 ./build.sh
               echo "/opt/osxcross/target/bin"                                                       >> $GITHUB_PATH
               echo "CROSS_PREFIX=x86_64-apple-darwin23-"                                            >> $GITHUB_ENV
-              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix=x86_64-apple-darwin23- --arch=x86_64 --target-os=darwin --cc=x86_64-apple-darwin23-clang --cxx=x86_64-apple-darwin23-clang++" >> $GITHUB_ENV
+              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix=x86_64-apple-darwin23- --arch=x86_64 --target-os=darwin --cc=x86_64-apple-darwin23-clang --cxx=x86_64-apple-darwin23-clang++ --disable-videotoolbox --disable-audiotoolbox" >> $GITHUB_ENV
               echo "EXTRA_LDFLAGS="                                                                  >> $GITHUB_ENV
               ;;
 
@@ -139,18 +139,18 @@ jobs:
               cd /opt/osxcross && UNATTENDED=1 ./build.sh
               echo "/opt/osxcross/target/bin"                                                       >> $GITHUB_PATH
               echo "CROSS_PREFIX=arm64-apple-darwin23-"                                             >> $GITHUB_ENV
-              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix=arm64-apple-darwin23- --arch=aarch64 --target-os=darwin --cc=arm64-apple-darwin23-clang --cxx=arm64-apple-darwin23-clang++" >> $GITHUB_ENV
+              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix=arm64-apple-darwin23- --arch=aarch64 --target-os=darwin --cc=arm64-apple-darwin23-clang --cxx=arm64-apple-darwin23-clang++ --disable-videotoolbox --disable-audiotoolbox" >> $GITHUB_ENV
               echo "EXTRA_LDFLAGS="                                                                  >> $GITHUB_ENV
               ;;
 
             freebsd-amd64)
               sudo apt-get install -y --no-install-recommends clang lld
-              wget -q "https://download.freebsd.org/releases/amd64/amd64/14.2-RELEASE/base.txz"
+              wget -q "https://download.freebsd.org/releases/amd64/amd64/14.4-RELEASE/base.txz"
               sudo mkdir -p /opt/freebsd-amd64
               sudo tar xJf base.txz -C /opt/freebsd-amd64 ./lib ./usr/lib ./usr/include
-              printf '#!/bin/sh\nexec clang --target=x86_64-unknown-freebsd14.2 --sysroot=/opt/freebsd-amd64 "$@"\n' \
+              printf '#!/bin/sh\nexec clang --target=x86_64-unknown-freebsd14.4 --sysroot=/opt/freebsd-amd64 "$@"\n' \
                 | sudo tee /usr/local/bin/freebsd-amd64-cc > /dev/null
-              printf '#!/bin/sh\nexec clang++ --target=x86_64-unknown-freebsd14.2 --sysroot=/opt/freebsd-amd64 "$@"\n' \
+              printf '#!/bin/sh\nexec clang++ --target=x86_64-unknown-freebsd14.4 --sysroot=/opt/freebsd-amd64 "$@"\n' \
                 | sudo tee /usr/local/bin/freebsd-amd64-c++ > /dev/null
               sudo chmod +x /usr/local/bin/freebsd-amd64-cc /usr/local/bin/freebsd-amd64-c++
               echo "CROSS_PREFIX="                                                                                                                                                          >> $GITHUB_ENV
@@ -160,12 +160,12 @@ jobs:
 
             freebsd-arm64)
               sudo apt-get install -y --no-install-recommends clang lld
-              wget -q "https://download.freebsd.org/releases/arm64/aarch64/14.2-RELEASE/base.txz"
+              wget -q "https://download.freebsd.org/releases/arm64/aarch64/14.4-RELEASE/base.txz"
               sudo mkdir -p /opt/freebsd-arm64
               sudo tar xJf base.txz -C /opt/freebsd-arm64 ./lib ./usr/lib ./usr/include
-              printf '#!/bin/sh\nexec clang --target=aarch64-unknown-freebsd14.2 --sysroot=/opt/freebsd-arm64 "$@"\n' \
+              printf '#!/bin/sh\nexec clang --target=aarch64-unknown-freebsd14.4 --sysroot=/opt/freebsd-arm64 "$@"\n' \
                 | sudo tee /usr/local/bin/freebsd-arm64-cc > /dev/null
-              printf '#!/bin/sh\nexec clang++ --target=aarch64-unknown-freebsd14.2 --sysroot=/opt/freebsd-arm64 "$@"\n' \
+              printf '#!/bin/sh\nexec clang++ --target=aarch64-unknown-freebsd14.4 --sysroot=/opt/freebsd-arm64 "$@"\n' \
                 | sudo tee /usr/local/bin/freebsd-arm64-c++ > /dev/null
               sudo chmod +x /usr/local/bin/freebsd-arm64-cc /usr/local/bin/freebsd-arm64-c++
               echo "CROSS_PREFIX="                                                                                                                                                          >> $GITHUB_ENV
