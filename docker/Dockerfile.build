@@ -620,9 +620,9 @@ meson setup "${BUILD_ROOT}/harfbuzz-arm64" "${SRC_DIR}/harfbuzz-${HARFBUZZ_VERSI
     --prefix=/opt/deps/arm64 \
     --libdir=lib \
     --default-library=static \
-    -Dc_args=-Wno-error=redundant-decls \
+    -Dc_args=-Wno-redundant-decls \
     -Dcpp_std=c++11 \
-    -Dcpp_args=-Wno-error=redundant-decls \
+    -Dcpp_args=-Wno-redundant-decls \
     -Dbenchmark=disabled \
     -Dcairo=disabled \
     -Ddocs=disabled \
