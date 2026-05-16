@@ -1,16 +1,11 @@
-name: Build Linux Binaries
+name: Build FFmpeg Binaries
 
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - 'Dockerfile'
-      - '.github/workflows/build-binaries.yml'
-  schedule:
-    - cron: '0 0 1 * *'
   workflow_run:
     workflows: ['Build Environment Image']
     types: [completed]
+  schedule:
+    - cron: '0 0 1 * *'
   workflow_dispatch:
     inputs:
       ffmpeg_version:
@@ -24,12 +19,17 @@ env:
 
 jobs:
   get-version:
+    if: >-
+      ${{ github.event_name != 'workflow_run' ||
+        (github.event.workflow_run.conclusion == 'success' &&
+         (github.event.workflow_run.head_branch == 'main' ||
+          github.event.workflow_run.head_branch == 'master')) }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
-      - name: Get FFmpeg Version
+      - name: Get FFmpeg version
         id: version
         run: |
           if [ -n "${{ github.event.inputs.ffmpeg_version }}" ]; then
@@ -40,21 +40,14 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
 
-  build:
-    name: Build (${{ matrix.arch }})
+  # ============================================================
+  # Linux — use the pre-baked :build image (full static deps)
+  # ============================================================
+  build-linux:
+    name: Linux (${{ matrix.arch }})
     needs: get-version
-    if: >-
-      ${{
-        github.event_name != 'workflow_run' ||
-        (
-          github.event.workflow_run.conclusion == 'success' &&
-          (
-            github.event.workflow_run.head_branch == 'main' ||
-            github.event.workflow_run.head_branch == 'master'
-          )
-        )
-      }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container:
       image: ghcr.io/binmgr/ffmpeg:build
       credentials:
@@ -64,12 +57,11 @@ jobs:
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
-
     steps:
       - name: Build FFmpeg
         run: build-ffmpeg ${{ matrix.arch }} ${{ needs.get-version.outputs.version }}
 
-      - name: Upload artifacts
+      - name: Upload
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: ffmpeg-linux-${{ matrix.arch }}
@@ -77,8 +69,144 @@ jobs:
             /output/ffmpeg-linux-${{ matrix.arch }}
             /output/ffprobe-linux-${{ matrix.arch }}
 
+  # ============================================================
+  # Windows / macOS / FreeBSD — ubuntu runner + runtime toolchain
+  # ============================================================
+  build-other:
+    name: ${{ matrix.os }} (${{ matrix.arch }})
+    needs: get-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows, arch: amd64, target_os: mingw32,  ext: '.exe' }
+          - { os: windows, arch: arm64, target_os: mingw32,  ext: '.exe' }
+          - { os: darwin,  arch: amd64, target_os: darwin,   ext: ''     }
+          - { os: darwin,  arch: arm64, target_os: darwin,   ext: ''     }
+          - { os: freebsd, arch: amd64, target_os: freebsd,  ext: ''     }
+          - { os: freebsd, arch: arm64, target_os: freebsd,  ext: ''     }
+    env:
+      FFMPEG_VERSION: ${{ needs.get-version.outputs.version }}
+    steps:
+      - name: Install base build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config nasm yasm git curl wget \
+            autoconf automake libtool texinfo zlib1g-dev libssl-dev xz-utils
+
+      - name: Setup toolchain
+        run: |
+          case "${{ matrix.os }}-${{ matrix.arch }}" in
+
+            windows-amd64)
+              sudo apt-get install -y --no-install-recommends mingw-w64
+              echo "CROSS_PREFIX=x86_64-w64-mingw32-"                                          >> $GITHUB_ENV
+              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix=x86_64-w64-mingw32- --arch=x86_64 --target-os=mingw32" >> $GITHUB_ENV
+              echo "EXTRA_LDFLAGS=-static"                                                      >> $GITHUB_ENV
+              ;;
+
+            windows-arm64)
+              wget -q https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
+              sudo tar xJf llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz -C /opt
+              echo "/opt/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64/bin" >> $GITHUB_PATH
+              echo "CROSS_PREFIX=aarch64-w64-mingw32-"                                                    >> $GITHUB_ENV
+              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix=aarch64-w64-mingw32- --arch=aarch64 --target-os=mingw32" >> $GITHUB_ENV
+              echo "EXTRA_LDFLAGS=-static"                                                                 >> $GITHUB_ENV
+              ;;
+
+            darwin-amd64)
+              sudo apt-get install -y --no-install-recommends clang libxml2-dev llvm-dev uuid-dev
+              git clone --depth 1 https://github.com/tpoechtrager/osxcross.git /opt/osxcross
+              mkdir -p /opt/osxcross/tarballs
+              wget -q "https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz" \
+                   -O /opt/osxcross/tarballs/MacOSX14.0.sdk.tar.xz
+              cd /opt/osxcross && UNATTENDED=1 ./build.sh
+              echo "/opt/osxcross/target/bin"                                                       >> $GITHUB_PATH
+              echo "CROSS_PREFIX=x86_64-apple-darwin23-"                                            >> $GITHUB_ENV
+              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix=x86_64-apple-darwin23- --arch=x86_64 --target-os=darwin" >> $GITHUB_ENV
+              echo "EXTRA_LDFLAGS="                                                                  >> $GITHUB_ENV
+              ;;
+
+            darwin-arm64)
+              sudo apt-get install -y --no-install-recommends clang libxml2-dev llvm-dev uuid-dev
+              git clone --depth 1 https://github.com/tpoechtrager/osxcross.git /opt/osxcross
+              mkdir -p /opt/osxcross/tarballs
+              wget -q "https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz" \
+                   -O /opt/osxcross/tarballs/MacOSX14.0.sdk.tar.xz
+              cd /opt/osxcross && UNATTENDED=1 ./build.sh
+              echo "/opt/osxcross/target/bin"                                                       >> $GITHUB_PATH
+              echo "CROSS_PREFIX=aarch64-apple-darwin23-"                                           >> $GITHUB_ENV
+              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix=aarch64-apple-darwin23- --arch=aarch64 --target-os=darwin" >> $GITHUB_ENV
+              echo "EXTRA_LDFLAGS="                                                                  >> $GITHUB_ENV
+              ;;
+
+            freebsd-amd64)
+              sudo apt-get install -y --no-install-recommends clang lld
+              wget -q "https://download.freebsd.org/releases/amd64/14.1-RELEASE/base.txz"
+              sudo mkdir -p /opt/freebsd-amd64
+              sudo tar xJf base.txz -C /opt/freebsd-amd64 ./lib ./usr/lib ./usr/include
+              echo "CROSS_PREFIX="                                                                                                        >> $GITHUB_ENV
+              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix= --arch=x86_64  --target-os=freebsd --sysroot=/opt/freebsd-amd64"  >> $GITHUB_ENV
+              echo "EXTRA_LDFLAGS=-static"                                                                                                >> $GITHUB_ENV
+              ;;
+
+            freebsd-arm64)
+              sudo apt-get install -y --no-install-recommends clang lld
+              wget -q "https://download.freebsd.org/releases/arm64/aarch64/14.1-RELEASE/base.txz"
+              sudo mkdir -p /opt/freebsd-arm64
+              sudo tar xJf base.txz -C /opt/freebsd-arm64 ./lib ./usr/lib ./usr/include
+              echo "CROSS_PREFIX="                                                                                                         >> $GITHUB_ENV
+              echo "CROSS_FLAGS=--enable-cross-compile --cross-prefix= --arch=aarch64 --target-os=freebsd --sysroot=/opt/freebsd-arm64"   >> $GITHUB_ENV
+              echo "EXTRA_LDFLAGS=-static"                                                                                                 >> $GITHUB_ENV
+              ;;
+          esac
+
+      - name: Build FFmpeg
+        run: |
+          wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
+          tar xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"
+          cd "ffmpeg-${FFMPEG_VERSION}"
+
+          # shellcheck disable=SC2086
+          ./configure \
+            --prefix="$PWD/../output" \
+            --enable-gpl \
+            --enable-version3 \
+            --enable-nonfree \
+            --enable-static \
+            --disable-shared \
+            --disable-debug \
+            --disable-doc \
+            --disable-ffplay \
+            --pkg-config-flags=--static \
+            ${CROSS_FLAGS} \
+            --extra-ldflags="${EXTRA_LDFLAGS}" || { cat ffbuild/config.log; exit 1; }
+
+          make -j"$(nproc)"
+          make install
+          cd ..
+
+          ${CROSS_PREFIX}strip "output/bin/ffmpeg${{ matrix.ext }}"  2>/dev/null || true
+          ${CROSS_PREFIX}strip "output/bin/ffprobe${{ matrix.ext }}" 2>/dev/null || true
+
+          mkdir -p dist
+          cp "output/bin/ffmpeg${{ matrix.ext }}"  "dist/ffmpeg-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          cp "output/bin/ffprobe${{ matrix.ext }}" "dist/ffprobe-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+
+      - name: Upload
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: ffmpeg-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/
+
+  # ============================================================
+  # Release — only after all builds succeed
+  # ============================================================
   release:
-    needs: [get-version, build]
+    needs: [get-version, build-linux, build-other]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -88,7 +216,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           path: artifacts
@@ -101,8 +229,10 @@ jobs:
       - name: Prepare release
         run: |
           mkdir -p release
-          cp artifacts/* release/
-          chmod +x release/*
+          find artifacts -type f -exec cp {} release/ \;
+          chmod +x release/ffmpeg-linux-*   release/ffprobe-linux-* \
+                   release/ffmpeg-darwin-*  release/ffprobe-darwin-* \
+                   release/ffmpeg-freebsd-* release/ffprobe-freebsd-* 2>/dev/null || true
           cd release
           sha256sum * > SHA256SUMS.txt
 
@@ -115,7 +245,7 @@ jobs:
           gh release create "${{ needs.get-version.outputs.tag }}" \
             --repo "${{ github.repository }}" \
             --title "FFmpeg ${{ needs.get-version.outputs.version }}" \
-            --notes "Static FFmpeg binaries" \
+            --notes "Static FFmpeg binaries — Linux, Windows, macOS, FreeBSD (amd64/arm64)" \
             release/*
 
       - name: Set up Docker Buildx
@@ -128,10 +258,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare image context
+      - name: Prepare Docker context
         run: |
-          cp release/ffmpeg-linux-amd64 .
-          cp release/ffmpeg-linux-arm64 .
+          cp release/ffmpeg-linux-amd64  .
+          cp release/ffmpeg-linux-arm64  .
           cp release/ffprobe-linux-amd64 .
           cp release/ffprobe-linux-arm64 .
 
