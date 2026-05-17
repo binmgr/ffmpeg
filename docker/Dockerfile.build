@@ -907,7 +907,7 @@ case "$TARGET" in
         export PATH="/opt/osxcross/target/bin:${PATH}"
         CROSS_FLAGS='--enable-cross-compile --cross-prefix=x86_64-apple-darwin23- --arch=x86_64 --target-os=darwin --cc=x86_64-apple-darwin23-clang --cxx=x86_64-apple-darwin23-clang++'
         EXTRA_CFLAGS='-O2'
-        EXTRA_LDFLAGS=''
+        EXTRA_LDFLAGS='-fuse-ld=lld'
         STRIP_CMD='x86_64-apple-darwin23-strip'
         EXT=''
         ;;
@@ -916,22 +916,22 @@ case "$TARGET" in
         export PATH="/opt/osxcross/target/bin:${PATH}"
         CROSS_FLAGS='--enable-cross-compile --cross-prefix=arm64-apple-darwin23- --arch=aarch64 --target-os=darwin --cc=arm64-apple-darwin23-clang --cxx=arm64-apple-darwin23-clang++'
         EXTRA_CFLAGS='-O2'
-        EXTRA_LDFLAGS=''
+        EXTRA_LDFLAGS='-fuse-ld=lld'
         STRIP_CMD='arm64-apple-darwin23-strip'
         EXT=''
         ;;
     freebsd-amd64)
         FEATURE_FLAGS="$BASIC_FEATURE_FLAGS"
-        CROSS_FLAGS='--enable-cross-compile --arch=x86_64 --target-os=freebsd --sysroot=/opt/freebsd-amd64 --cc=freebsd-amd64-cc --cxx=freebsd-amd64-c++ --ld=ld.lld --disable-asm'
-        EXTRA_CFLAGS='-O2'
+        CROSS_FLAGS='--enable-cross-compile --arch=x86_64 --target-os=freebsd --sysroot=/opt/freebsd-amd64 --cc=freebsd-amd64-cc --cxx=freebsd-amd64-c++ --ld=ld.lld'
+        EXTRA_CFLAGS='-O2 -D_POSIX_C_SOURCE=200112L'
         EXTRA_LDFLAGS='-static'
         STRIP_CMD=':'
         EXT=''
         ;;
     freebsd-arm64)
         FEATURE_FLAGS="$BASIC_FEATURE_FLAGS"
-        CROSS_FLAGS='--enable-cross-compile --arch=aarch64 --target-os=freebsd --sysroot=/opt/freebsd-arm64 --cc=freebsd-arm64-cc --cxx=freebsd-arm64-c++ --ld=ld.lld --disable-asm'
-        EXTRA_CFLAGS='-O2'
+        CROSS_FLAGS='--enable-cross-compile --arch=aarch64 --target-os=freebsd --sysroot=/opt/freebsd-arm64 --cc=freebsd-arm64-cc --cxx=freebsd-arm64-c++ --ld=ld.lld'
+        EXTRA_CFLAGS='-O2 -D_POSIX_C_SOURCE=200112L'
         EXTRA_LDFLAGS='-static'
         STRIP_CMD=':'
         EXT=''
