@@ -917,20 +917,24 @@ case "$TARGET" in
         exit 1
         ;;
     darwin-amd64)
-        # Explicitly disable Linux/macOS-framework devices; configure may have
-        # auto-detected them incorrectly if SDK headers were not yet active.
+        # Pass --sysroot to FFmpeg configure so it uses macOS SDK headers for
+        # feature detection (not Alpine musl). Without this, FFmpeg adds
+        # -I/usr/include (host musl), finds linux/fb.h, enables fbdev, and
+        # fbdev_dec.c fails to compile for the darwin target.
+        DARWIN_SDK=$(ls -d /opt/osxcross/target/SDK/MacOSX*.sdk 2>/dev/null | sort -V | tail -1)
         FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox"
         export PATH="/opt/osxcross/target/bin:${PATH}"
-        CROSS_FLAGS='--enable-cross-compile --cross-prefix=x86_64-apple-darwin23- --arch=x86_64 --target-os=darwin --cc=x86_64-apple-darwin23-clang --cxx=x86_64-apple-darwin23-clang++'
+        CROSS_FLAGS="--enable-cross-compile --cross-prefix=x86_64-apple-darwin23- --arch=x86_64 --target-os=darwin --cc=x86_64-apple-darwin23-clang --cxx=x86_64-apple-darwin23-clang++ --sysroot=${DARWIN_SDK}"
         EXTRA_CFLAGS='-O2'
         EXTRA_LDFLAGS='-fuse-ld=lld'
         STRIP_CMD='x86_64-apple-darwin23-strip'
         EXT=''
         ;;
     darwin-arm64)
+        DARWIN_SDK=$(ls -d /opt/osxcross/target/SDK/MacOSX*.sdk 2>/dev/null | sort -V | tail -1)
         FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox"
         export PATH="/opt/osxcross/target/bin:${PATH}"
-        CROSS_FLAGS='--enable-cross-compile --cross-prefix=arm64-apple-darwin23- --arch=aarch64 --target-os=darwin --cc=arm64-apple-darwin23-clang --cxx=arm64-apple-darwin23-clang++'
+        CROSS_FLAGS="--enable-cross-compile --cross-prefix=arm64-apple-darwin23- --arch=aarch64 --target-os=darwin --cc=arm64-apple-darwin23-clang --cxx=arm64-apple-darwin23-clang++ --sysroot=${DARWIN_SDK}"
         EXTRA_CFLAGS='-O2'
         EXTRA_LDFLAGS='-fuse-ld=lld'
         STRIP_CMD='arm64-apple-darwin23-strip'
