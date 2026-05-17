@@ -162,13 +162,54 @@ jobs:
 
       - name: Prepare release
         run: |
-          mkdir -p release
-          find artifacts -type f ! -name VERSION -exec cp {} release/ \;
-          chmod +x release/ffmpeg-linux-*   release/ffprobe-linux-* \
-                   release/ffmpeg-darwin-*  release/ffprobe-darwin-* \
-                   release/ffmpeg-freebsd-* release/ffprobe-freebsd-* 2>/dev/null || true
-          cd release
-          sha256sum * > SHA256SUMS.txt
+          mkdir -p staging release
+
+          # Stage all built files flat
+          find artifacts -type f ! -name VERSION -exec cp {} staging/ \; 2>/dev/null || true
+
+          # Make unix binaries executable
+          chmod +x staging/ffmpeg-linux-*   staging/ffprobe-linux-*   2>/dev/null || true
+          chmod +x staging/ffplay-linux-*                              2>/dev/null || true
+          chmod +x staging/ffmpeg-darwin-*  staging/ffprobe-darwin-*  2>/dev/null || true
+          chmod +x staging/ffmpeg-freebsd-* staging/ffprobe-freebsd-* 2>/dev/null || true
+
+          # Direct ffmpeg binaries — one per target, kept as-is
+          for f in staging/ffmpeg-*; do
+            [ -f "$f" ] && cp "$f" "release/$(basename "$f")"
+          done
+
+          # tar.gz archives for unix targets: ffmpeg + ffprobe + ffplay (linux only)
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 freebsd-amd64 freebsd-arm64; do
+            tmpdir="$(mktemp -d)"
+            for tool in ffmpeg ffprobe ffplay; do
+              src="staging/${tool}-${target}"
+              if [ -f "$src" ]; then
+                cp "$src" "${tmpdir}/${tool}"
+                chmod +x "${tmpdir}/${tool}"
+              fi
+            done
+            if [ "$(ls -A "$tmpdir")" ]; then
+              (cd "$tmpdir" && tar czf "${GITHUB_WORKSPACE}/release/ffmpeg-${target}.tar.gz" -- *)
+            fi
+            rm -rf "$tmpdir"
+          done
+
+          # zip archives for windows targets: ffmpeg.exe + ffprobe.exe
+          for target in windows-amd64 windows-arm64; do
+            tmpdir="$(mktemp -d)"
+            for tool in ffmpeg ffprobe; do
+              src="staging/${tool}-${target}.exe"
+              [ -f "$src" ] && cp "$src" "${tmpdir}/${tool}.exe"
+            done
+            if [ "$(ls -A "$tmpdir")" ]; then
+              (cd "$tmpdir" && zip "${GITHUB_WORKSPACE}/release/ffmpeg-${target}.zip" -- *.exe)
+            fi
+            rm -rf "$tmpdir"
+          done
+
+          # SHA256 checksums over all release assets
+          cd "${GITHUB_WORKSPACE}/release"
+          sha256sum -- * > SHA256SUMS.txt
 
       - name: Create release
         env:
@@ -194,10 +235,12 @@ jobs:
 
       - name: Prepare Docker context
         run: |
-          cp release/ffmpeg-linux-amd64  .
-          cp release/ffmpeg-linux-arm64  .
-          cp release/ffprobe-linux-amd64 .
-          cp release/ffprobe-linux-arm64 .
+          cp staging/ffmpeg-linux-amd64  .
+          cp staging/ffmpeg-linux-arm64  .
+          cp staging/ffprobe-linux-amd64 .
+          cp staging/ffprobe-linux-arm64 .
+          cp staging/ffplay-linux-amd64  . 2>/dev/null || true
+          cp staging/ffplay-linux-arm64  . 2>/dev/null || true
 
       - name: Build and push runtime image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6

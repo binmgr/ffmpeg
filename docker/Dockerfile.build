@@ -21,6 +21,7 @@ ARG HARFBUZZ_VERSION=9.0.0
 ARG LIBASS_VERSION=0.17.3
 ARG MACOS_SDK_VERSION=14.0
 ARG FREEBSD_VERSION=14.4
+ARG SDL2_VERSION=2.32.10
 
 RUN apk add --no-cache \
     autoconf automake bash brotli-static bzip2 bzip2-dev bzip2-static build-base cmake curl curl-dev curl-static diffutils \
@@ -33,6 +34,7 @@ RUN apk add --no-cache \
     oniguruma-dev openssl-dev openssl-libs-static patch pcre-dev perl pkgconf python3 rsync sed \
     sqlite-dev sqlite-static tar texinfo tiff-dev util-linux-dev wget x264-dev xz xz-dev xz-static \
     yaml-dev yaml-static yasm zlib-dev zlib-static zstd-dev zstd-static aom-dev c-ares-dev \
+    alsa-lib-dev alsa-lib-static libx11-dev libxext-dev \
     clang lld llvm mingw-w64-gcc
 
 RUN ln -sfn /usr/bin/python3 /usr/bin/python
@@ -673,6 +675,39 @@ make
 make install
 rm -rf "${SRC_DIR}/libass-${LIBASS_VERSION}" "${SRC_DIR}/libass-${LIBASS_VERSION}-arm64" "${SRC_DIR}/libass.tar.xz"
 
+# SDL2 (for ffplay)
+# amd64: full build — X11 and ALSA auto-detected from Alpine native headers.
+# arm64: minimal build — X11/Wayland/KMS/ALSA disabled; no cross-sysroot headers
+#        available, so only dummy/offscreen backends are compiled in.  ffplay
+#        still works on arm64 for users who set SDL_VIDEODRIVER/SDL_AUDIODRIVER.
+clean_tree "${SRC_DIR}/SDL2-${SDL2_VERSION}" "${SRC_DIR}/SDL2-${SDL2_VERSION}-arm64"
+download_extract sdl2.tar.gz "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-${SDL2_VERSION}.tar.gz"
+cp -a "${SRC_DIR}/SDL2-${SDL2_VERSION}" "${SRC_DIR}/SDL2-${SDL2_VERSION}-arm64"
+set_native_pkg_config
+cmake_native "${SRC_DIR}/SDL2-${SDL2_VERSION}" "${BUILD_ROOT}/sdl2-amd64" \
+    -DSDL_SHARED=OFF \
+    -DSDL_STATIC=ON \
+    -DSDL_STATIC_PIC=ON \
+    -DSDL_TEST=OFF \
+    -DSDL_TESTS=OFF \
+    -DSDL_EXAMPLES=OFF
+set_cross_pkg_config
+cmake_cross "${SRC_DIR}/SDL2-${SDL2_VERSION}-arm64" "${BUILD_ROOT}/sdl2-arm64" \
+    -DSDL_SHARED=OFF \
+    -DSDL_STATIC=ON \
+    -DSDL_STATIC_PIC=ON \
+    -DSDL_TEST=OFF \
+    -DSDL_TESTS=OFF \
+    -DSDL_EXAMPLES=OFF \
+    -DSDL_X11=OFF \
+    -DSDL_WAYLAND=OFF \
+    -DSDL_KMSDRM=OFF \
+    -DSDL_ALSA=OFF \
+    -DSDL_PULSEAUDIO=OFF \
+    -DSDL_SNDIO=OFF \
+    -DSDL_OSS=OFF
+rm -rf "${SRC_DIR}/SDL2-${SDL2_VERSION}" "${SRC_DIR}/SDL2-${SDL2_VERSION}-arm64" "${SRC_DIR}/sdl2.tar.gz"
+
 for libdir in /opt/deps/amd64 /opt/deps/arm64; do
     find "${libdir}" -name '*.la' -delete
     find "${libdir}" -type f -name '*.so' -delete
@@ -680,13 +715,13 @@ for libdir in /opt/deps/amd64 /opt/deps/arm64; do
 done
 
 set_native_pkg_config
-for pc in x264 x265 vpx dav1d SvtAv1Enc fdk-aac opus ogg vorbis vidstab rubberband zimg harfbuzz libass; do
+for pc in x264 x265 vpx dav1d SvtAv1Enc fdk-aac opus ogg vorbis vidstab rubberband zimg harfbuzz libass sdl2; do
     pkg-config --exists "${pc}"
     pkg-config --static --libs "${pc}" >/dev/null
     pkg-config --modversion "${pc}" >/dev/null
 done
 set_cross_pkg_config
-for pc in x264 x265 vpx dav1d SvtAv1Enc fdk-aac opus ogg vorbis vidstab rubberband zimg harfbuzz libass; do
+for pc in x264 x265 vpx dav1d SvtAv1Enc fdk-aac opus ogg vorbis vidstab rubberband zimg harfbuzz libass sdl2; do
     pkg-config --exists "${pc}"
     pkg-config --static --libs "${pc}" >/dev/null
     pkg-config --modversion "${pc}" >/dev/null
@@ -832,7 +867,8 @@ LINUX_FEATURE_FLAGS="
     --disable-shared
     --disable-debug
     --disable-doc
-    --disable-ffplay
+    --enable-ffplay
+    --enable-sdl2
     --enable-libx264
     --enable-libx265
     --enable-libvpx
@@ -1013,13 +1049,14 @@ cd "ffmpeg-${FFMPEG_VERSION}"
     || { cat ffbuild/config.log; exit 1; }
 
 make -j"$(nproc)"
-${STRIP_CMD} "ffmpeg${EXT}" "ffprobe${EXT}" 2>/dev/null || true
+${STRIP_CMD} "ffmpeg${EXT}" "ffprobe${EXT}" "ffplay${EXT}" 2>/dev/null || true
 
 mkdir -p /output
 cp "ffmpeg${EXT}"  "/output/ffmpeg-${TARGET}${EXT}"
 cp "ffprobe${EXT}" "/output/ffprobe-${TARGET}${EXT}"
+[ -f "ffplay${EXT}" ] && cp "ffplay${EXT}" "/output/ffplay-${TARGET}${EXT}" || true
 echo "${FFMPEG_VERSION}" > /output/VERSION
-echo "Built: ffmpeg-${TARGET}${EXT}, ffprobe-${TARGET}${EXT}"
+echo "Built: ffmpeg-${TARGET}${EXT}, ffprobe-${TARGET}${EXT}$([ -f "ffplay${EXT}" ] && echo ", ffplay-${TARGET}${EXT}" || true)"
 EOF
 
 RUN chmod +x /usr/local/bin/build-ffmpeg
