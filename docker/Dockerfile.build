@@ -917,14 +917,18 @@ case "$TARGET" in
         exit 1
         ;;
     darwin-amd64)
-        # Pass --sysroot to FFmpeg configure so it uses macOS SDK headers for
-        # feature detection (not Alpine musl). Without this, FFmpeg adds
-        # -I/usr/include (host musl), finds linux/fb.h, enables fbdev, and
-        # fbdev_dec.c fails to compile for the darwin target.
         DARWIN_SDK=$(ls -d /opt/osxcross/target/SDK/MacOSX*.sdk 2>/dev/null | sort -V | tail -1)
         FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox"
         export PATH="/opt/osxcross/target/bin:${PATH}"
         CROSS_FLAGS="--enable-cross-compile --cross-prefix=x86_64-apple-darwin23- --arch=x86_64 --target-os=darwin --cc=x86_64-apple-darwin23-clang --cxx=x86_64-apple-darwin23-clang++ --sysroot=${DARWIN_SDK}"
+        # Prevent Alpine/musl pkg-config from injecting -I/usr/include into CFLAGS.
+        # PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 is set globally for linux builds; unset
+        # it here so pkg-config filters system cflags and does not return -I/usr/include.
+        # Point pkg-config at the SDK so library checks use macOS headers.
+        unset PKG_CONFIG_ALLOW_SYSTEM_CFLAGS PKG_CONFIG_ALLOW_SYSTEM_LIBS
+        export PKG_CONFIG_SYSROOT_DIR="${DARWIN_SDK}"
+        export PKG_CONFIG_PATH="${DARWIN_SDK}/usr/lib/pkgconfig"
+        export PKG_CONFIG_LIBDIR="${DARWIN_SDK}/usr/lib/pkgconfig"
         EXTRA_CFLAGS='-O2'
         EXTRA_LDFLAGS='-fuse-ld=lld'
         STRIP_CMD='x86_64-apple-darwin23-strip'
@@ -935,6 +939,10 @@ case "$TARGET" in
         FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox"
         export PATH="/opt/osxcross/target/bin:${PATH}"
         CROSS_FLAGS="--enable-cross-compile --cross-prefix=arm64-apple-darwin23- --arch=aarch64 --target-os=darwin --cc=arm64-apple-darwin23-clang --cxx=arm64-apple-darwin23-clang++ --sysroot=${DARWIN_SDK}"
+        unset PKG_CONFIG_ALLOW_SYSTEM_CFLAGS PKG_CONFIG_ALLOW_SYSTEM_LIBS
+        export PKG_CONFIG_SYSROOT_DIR="${DARWIN_SDK}"
+        export PKG_CONFIG_PATH="${DARWIN_SDK}/usr/lib/pkgconfig"
+        export PKG_CONFIG_LIBDIR="${DARWIN_SDK}/usr/lib/pkgconfig"
         EXTRA_CFLAGS='-O2'
         EXTRA_LDFLAGS='-fuse-ld=lld'
         STRIP_CMD='arm64-apple-darwin23-strip'
