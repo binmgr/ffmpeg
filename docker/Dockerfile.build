@@ -34,7 +34,7 @@ RUN apk add --no-cache \
     oniguruma-dev openssl-dev openssl-libs-static patch pcre-dev perl pkgconf python3 rsync sed \
     sqlite-dev sqlite-static tar texinfo tiff-dev util-linux-dev wget x264-dev xz xz-dev xz-static \
     yaml-dev yaml-static yasm zlib-dev zlib-static zstd-dev zstd-static aom-dev c-ares-dev \
-    clang lld cpio mingw-w64-gcc
+    clang lld mingw-w64-gcc
 
 RUN ln -sfn /usr/bin/python3 /usr/bin/python
 
@@ -753,13 +753,27 @@ RUN wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MIN
     && mv "/opt/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64" /opt/llvm-mingw \
     && rm "llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64.tar.xz"
 
-# macOS: osxcross + MacOSX SDK
-RUN git clone --depth 1 https://github.com/tpoechtrager/osxcross.git /opt/osxcross \
-    && mkdir -p /opt/osxcross/tarballs \
+# macOS: MacOSX SDK + clang wrapper scripts (no osxcross cctools build needed)
+# Alpine's clang has full LLVM multi-target support including Apple/Mach-O targets.
+# We build thin wrappers that call clang with --target and --sysroot; strip is a no-op
+# since we don't ship cctools and Mach-O binaries don't need stripping for distribution.
+RUN mkdir -p /opt/osxcross/target/SDK /opt/osxcross/target/bin \
     && wget -q "https://github.com/joseluisq/macosx-sdks/releases/download/${MACOS_SDK_VERSION}/MacOSX${MACOS_SDK_VERSION}.sdk.tar.xz" \
-         -O "/opt/osxcross/tarballs/MacOSX${MACOS_SDK_VERSION}.sdk.tar.xz" \
-    && cd /opt/osxcross && UNATTENDED=1 ./build.sh \
-    && rm -rf /opt/osxcross/tarballs /opt/osxcross/build
+         -O /tmp/MacOSX.sdk.tar.xz \
+    && tar xJf /tmp/MacOSX.sdk.tar.xz -C /opt/osxcross/target/SDK \
+    && rm /tmp/MacOSX.sdk.tar.xz \
+    && SDK="/opt/osxcross/target/SDK/MacOSX${MACOS_SDK_VERSION}.sdk" \
+    && for triple in x86_64-apple-darwin23 arm64-apple-darwin23; do \
+           printf '#!/bin/sh\nexec clang --target=%s --sysroot=%s "$@"\n'   "$triple" "$SDK" > "/opt/osxcross/target/bin/${triple}-clang"   ; \
+           printf '#!/bin/sh\nexec clang++ --target=%s --sysroot=%s "$@"\n' "$triple" "$SDK" > "/opt/osxcross/target/bin/${triple}-clang++" ; \
+           ln -sf "${triple}-clang"   "/opt/osxcross/target/bin/${triple}-cc"  ; \
+           ln -sf "${triple}-clang++" "/opt/osxcross/target/bin/${triple}-c++" ; \
+           ln -sf "${triple}-clang"   "/opt/osxcross/target/bin/${triple}-gcc" ; \
+           printf '#!/bin/sh\n: strip not available for Mach-O targets\n' > "/opt/osxcross/target/bin/${triple}-strip" ; \
+           chmod +x "/opt/osxcross/target/bin/${triple}-clang" \
+                    "/opt/osxcross/target/bin/${triple}-clang++" \
+                    "/opt/osxcross/target/bin/${triple}-strip" ; \
+       done
 
 # FreeBSD sysroots + clang wrapper scripts
 RUN mkdir -p /opt/freebsd-amd64 /opt/freebsd-arm64 \
