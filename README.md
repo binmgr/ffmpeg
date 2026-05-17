@@ -154,8 +154,8 @@ docker/Dockerfile.build  →  ghcr.io/binmgr/ffmpeg:build  (Alpine build env)
 │       ├── build-env-image.yml   # builds ghcr.io/binmgr/ffmpeg:build
 │       └── build-binaries.yml    # builds all 8 targets + release
 ├── docker/
+│   ├── Dockerfile                # Runtime image (FROM scratch, ffmpeg + ffprobe)
 │   └── Dockerfile.build          # Alpine build environment + build-ffmpeg script
-├── Dockerfile                    # Runtime image (FROM scratch, ffmpeg + ffprobe)
 ├── LICENSE.md
 └── README.md
 ```
