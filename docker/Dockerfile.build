@@ -910,7 +910,7 @@ case "$TARGET" in
     darwin-amd64)
         # Explicitly disable Linux/macOS-framework devices; configure may have
         # auto-detected them incorrectly if SDK headers were not yet active.
-        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox --disable-fbdev --disable-avfoundation --disable-coreimage"
+        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox"
         export PATH="/opt/osxcross/target/bin:${PATH}"
         CROSS_FLAGS='--enable-cross-compile --cross-prefix=x86_64-apple-darwin23- --arch=x86_64 --target-os=darwin --cc=x86_64-apple-darwin23-clang --cxx=x86_64-apple-darwin23-clang++'
         EXTRA_CFLAGS='-O2'
@@ -919,7 +919,7 @@ case "$TARGET" in
         EXT=''
         ;;
     darwin-arm64)
-        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox --disable-fbdev --disable-avfoundation --disable-coreimage"
+        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS --disable-videotoolbox --disable-audiotoolbox"
         export PATH="/opt/osxcross/target/bin:${PATH}"
         CROSS_FLAGS='--enable-cross-compile --cross-prefix=arm64-apple-darwin23- --arch=aarch64 --target-os=darwin --cc=arm64-apple-darwin23-clang --cxx=arm64-apple-darwin23-clang++'
         EXTRA_CFLAGS='-O2'
@@ -929,13 +929,14 @@ case "$TARGET" in
         ;;
     freebsd-amd64)
         FEATURE_FLAGS="$BASIC_FEATURE_FLAGS"
-        # --ld=ld.lld removed: configure link tests must go through the clang
-        # wrapper so that --sysroot is passed to the linker and FreeBSD libc
-        # symbols (posix_memalign etc.) are found.  -fuse-ld=lld in
-        # EXTRA_LDFLAGS ensures the final binary links through lld.
+        # --ld omitted so configure link tests go through freebsd-amd64-cc
+        # (which carries --sysroot), allowing posix_memalign to resolve.
+        # -fuse-ld=lld in EXTRA_LDFLAGS selects lld for the final link.
+        # -lmd: FreeBSD 14 moved SHA256 routines into libmd.
         CROSS_FLAGS='--enable-cross-compile --arch=x86_64 --target-os=freebsd --sysroot=/opt/freebsd-amd64 --cc=freebsd-amd64-cc --cxx=freebsd-amd64-c++'
         EXTRA_CFLAGS='-O2 -D_POSIX_C_SOURCE=200112L'
         EXTRA_LDFLAGS='-static -fuse-ld=lld'
+        EXTRA_LIBS='-lmd'
         STRIP_CMD=':'
         EXT=''
         ;;
@@ -944,6 +945,7 @@ case "$TARGET" in
         CROSS_FLAGS='--enable-cross-compile --arch=aarch64 --target-os=freebsd --sysroot=/opt/freebsd-arm64 --cc=freebsd-arm64-cc --cxx=freebsd-arm64-c++'
         EXTRA_CFLAGS='-O2 -D_POSIX_C_SOURCE=200112L'
         EXTRA_LDFLAGS='-static -fuse-ld=lld'
+        EXTRA_LIBS='-lmd'
         STRIP_CMD=':'
         EXT=''
         ;;
