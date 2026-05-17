@@ -19,7 +19,6 @@ ARG X265_VERSION=3.6
 ARG BROTLI_VERSION=1.1.0
 ARG HARFBUZZ_VERSION=9.0.0
 ARG LIBASS_VERSION=0.17.3
-ARG LLVM_MINGW_VERSION=20241217
 ARG MACOS_SDK_VERSION=14.0
 ARG FREEBSD_VERSION=14.4
 
@@ -747,17 +746,12 @@ EOF
 
 RUN chmod +x /usr/local/bin/build-static-deps && /usr/local/bin/build-static-deps && rm -f /usr/local/bin/build-static-deps
 
-# Windows arm64: llvm-mingw (Ubuntu binary; gcompat provides glibc compat on musl)
-RUN wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64.tar.xz" \
-    && tar xJf "llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64.tar.xz" -C /opt \
-    && mv "/opt/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64" /opt/llvm-mingw \
-    && rm "llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-20.04-x86_64.tar.xz"
-
 # macOS: MacOSX SDK + clang wrapper scripts (no osxcross cctools build needed)
 # Alpine's clang has full LLVM multi-target support including Apple/Mach-O targets.
 # We build thin wrappers that call clang with --target and -isysroot.
-# -nostdinc + explicit -isystem is required so Alpine's musl /usr/include is
-# completely excluded and only macOS SDK headers are used.
+# -nostdlibinc excludes Alpine's musl /usr/include (system lib dirs) while
+# keeping clang's own builtin resource headers (stddef.h, float.h, etc.).
+# -nostdinc would also strip the builtins and break compilation.
 # strip is a no-op since we don't ship cctools and Mach-O binaries don't
 # need stripping for distribution.
 RUN mkdir -p /opt/osxcross/target/SDK /opt/osxcross/target/bin \
@@ -768,10 +762,10 @@ RUN mkdir -p /opt/osxcross/target/SDK /opt/osxcross/target/bin \
     && SDK="/opt/osxcross/target/SDK/MacOSX${MACOS_SDK_VERSION}.sdk" \
     && MACVER="${MACOS_SDK_VERSION}" \
     && for triple in x86_64-apple-darwin23 arm64-apple-darwin23; do \
-           printf '#!/bin/sh\nexec clang --target=%s -isysroot %s -mmacosx-version-min=%s -nostdinc -isystem %s/usr/include -iframework %s/System/Library/Frameworks "$@"\n' \
-               "$triple" "$SDK" "$MACVER" "$SDK" "$SDK" > "/opt/osxcross/target/bin/${triple}-clang" ; \
-           printf '#!/bin/sh\nexec clang++ --target=%s -isysroot %s -mmacosx-version-min=%s -nostdinc -isystem %s/usr/include -iframework %s/System/Library/Frameworks "$@"\n' \
-               "$triple" "$SDK" "$MACVER" "$SDK" "$SDK" > "/opt/osxcross/target/bin/${triple}-clang++" ; \
+           printf '#!/bin/sh\nexec clang --target=%s -isysroot %s -mmacosx-version-min=%s -nostdlibinc -isystem %s/usr/include "$@"\n' \
+               "$triple" "$SDK" "$MACVER" "$SDK" > "/opt/osxcross/target/bin/${triple}-clang" ; \
+           printf '#!/bin/sh\nexec clang++ --target=%s -isysroot %s -mmacosx-version-min=%s -nostdlibinc -isystem %s/usr/include "$@"\n' \
+               "$triple" "$SDK" "$MACVER" "$SDK" > "/opt/osxcross/target/bin/${triple}-clang++" ; \
            ln -sf "${triple}-clang"   "/opt/osxcross/target/bin/${triple}-cc"  ; \
            ln -sf "${triple}-clang++" "/opt/osxcross/target/bin/${triple}-c++" ; \
            ln -sf "${triple}-clang"   "/opt/osxcross/target/bin/${triple}-gcc" ; \
@@ -900,13 +894,11 @@ case "$TARGET" in
         EXT='.exe'
         ;;
     windows-arm64)
-        FEATURE_FLAGS="$BASIC_FEATURE_FLAGS"
-        export PATH="/opt/llvm-mingw/bin:${PATH}"
-        CROSS_FLAGS='--enable-cross-compile --cross-prefix=aarch64-w64-mingw32- --arch=aarch64 --target-os=mingw32'
-        EXTRA_CFLAGS='-O2'
-        EXTRA_LDFLAGS='-static'
-        STRIP_CMD='aarch64-w64-mingw32-strip'
-        EXT='.exe'
+        # windows-arm64 requires llvm-mingw which is a glibc binary that
+        # crashes on Alpine/musl. This target is built on ubuntu-latest in CI;
+        # see build-binaries.yml windows-arm64 job.
+        echo "windows-arm64 is not supported in this container — use the ubuntu-latest CI job." >&2
+        exit 1
         ;;
     darwin-amd64)
         # Explicitly disable Linux/macOS-framework devices; configure may have
@@ -952,7 +944,8 @@ case "$TARGET" in
         ;;
     *)
         echo "Unknown target: $TARGET" >&2
-        echo "Targets: linux-amd64 linux-arm64 windows-amd64 windows-arm64 darwin-amd64 darwin-arm64 freebsd-amd64 freebsd-arm64" >&2
+        echo "Targets: linux-amd64 linux-arm64 windows-amd64 darwin-amd64 darwin-arm64 freebsd-amd64 freebsd-arm64" >&2
+        echo "Note: windows-arm64 builds on ubuntu-latest in CI (not in this container)" >&2
         exit 1
         ;;
 esac
@@ -1005,4 +998,4 @@ RUN chmod +x /usr/local/bin/build-ffmpeg
 
 WORKDIR /workspace
 VOLUME ["/workspace", "/output"]
-CMD ["echo", "Usage: build-ffmpeg [linux-amd64|linux-arm64|windows-amd64|windows-arm64|darwin-amd64|darwin-arm64|freebsd-amd64|freebsd-arm64] [version]"]
+CMD ["echo", "Usage: build-ffmpeg [linux-amd64|linux-arm64|windows-amd64|darwin-amd64|darwin-arm64|freebsd-amd64|freebsd-arm64] [version]"]

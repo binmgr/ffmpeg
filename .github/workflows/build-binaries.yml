@@ -41,7 +41,7 @@ jobs:
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
 
   # ============================================================
-  # All 8 targets — run inside the pre-baked :build image
+  # 7 targets — run inside the pre-baked :build image (Alpine)
   # ============================================================
   build:
     name: ${{ matrix.target }}
@@ -60,7 +60,6 @@ jobs:
           - linux-amd64
           - linux-arm64
           - windows-amd64
-          - windows-arm64
           - darwin-amd64
           - darwin-arm64
           - freebsd-amd64
@@ -76,10 +75,72 @@ jobs:
           path: /output/
 
   # ============================================================
+  # windows-arm64 — llvm-mingw is a glibc binary that crashes on
+  # Alpine/musl; run this target on ubuntu-latest instead.
+  # ============================================================
+  windows-arm64:
+    name: windows-arm64
+    needs: get-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      LLVM_MINGW_VERSION: '20260505'
+    steps:
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            wget xz-utils nasm yasm pkg-config
+
+      - name: Install llvm-mingw
+        run: |
+          wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64.tar.xz"
+          sudo tar xJf "llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64.tar.xz" -C /opt
+          echo "/opt/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64/bin" >> "$GITHUB_PATH"
+
+      - name: Build FFmpeg ${{ needs.get-version.outputs.version }} for windows-arm64
+        run: |
+          VERSION="${{ needs.get-version.outputs.version }}"
+          wget -q "https://ffmpeg.org/releases/ffmpeg-${VERSION}.tar.xz"
+          tar xJf "ffmpeg-${VERSION}.tar.xz"
+          cd "ffmpeg-${VERSION}"
+          ./configure \
+            --prefix=/tmp/ffmpeg-install \
+            --enable-gpl \
+            --enable-version3 \
+            --enable-nonfree \
+            --enable-static \
+            --disable-shared \
+            --disable-debug \
+            --disable-doc \
+            --disable-ffplay \
+            --enable-cross-compile \
+            --cross-prefix=aarch64-w64-mingw32- \
+            --arch=aarch64 \
+            --target-os=mingw32 \
+            --cc=aarch64-w64-mingw32-clang \
+            --cxx=aarch64-w64-mingw32-clang++ \
+            --pkg-config=pkg-config \
+            --pkg-config-flags='--static' \
+            --extra-cflags='-O2' \
+            --extra-ldflags='-static'
+          make -j"$(nproc)"
+          mkdir -p /output
+          cp ffmpeg.exe  /output/ffmpeg-windows-arm64.exe
+          cp ffprobe.exe /output/ffprobe-windows-arm64.exe
+          echo "${VERSION}" > /output/VERSION
+
+      - name: Upload
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: ffmpeg-windows-arm64
+          path: /output/
+
+  # ============================================================
   # Release — only after all 8 builds succeed
   # ============================================================
   release:
-    needs: [get-version, build]
+    needs: [get-version, build, windows-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
