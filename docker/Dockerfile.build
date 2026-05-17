@@ -34,7 +34,7 @@ RUN apk add --no-cache \
     oniguruma-dev openssl-dev openssl-libs-static patch pcre-dev perl pkgconf python3 rsync sed \
     sqlite-dev sqlite-static tar texinfo tiff-dev util-linux-dev wget x264-dev xz xz-dev xz-static \
     yaml-dev yaml-static yasm zlib-dev zlib-static zstd-dev zstd-static aom-dev c-ares-dev \
-    alsa-lib-dev libx11-dev libxext-dev \
+    alsa-lib-dev libx11-dev libxext-dev wayland-dev wayland-protocols libxkbcommon-dev \
     clang lld llvm mingw-w64-gcc
 
 RUN ln -sfn /usr/bin/python3 /usr/bin/python
