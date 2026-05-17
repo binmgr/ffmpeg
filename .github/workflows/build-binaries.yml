@@ -125,16 +125,16 @@ jobs:
             --extra-cflags='-O2' \
             --extra-ldflags='-static'
           make -j"$(nproc)"
-          mkdir -p /output
-          cp ffmpeg.exe  /output/ffmpeg-windows-arm64.exe
-          cp ffprobe.exe /output/ffprobe-windows-arm64.exe
-          echo "${VERSION}" > /output/VERSION
+          mkdir -p "${GITHUB_WORKSPACE}/output"
+          cp ffmpeg.exe  "${GITHUB_WORKSPACE}/output/ffmpeg-windows-arm64.exe"
+          cp ffprobe.exe "${GITHUB_WORKSPACE}/output/ffprobe-windows-arm64.exe"
+          echo "${VERSION}" > "${GITHUB_WORKSPACE}/output/VERSION"
 
       - name: Upload
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: ffmpeg-windows-arm64
-          path: /output/
+          path: ${{ github.workspace }}/output/
 
   # ============================================================
   # Release — only after all 8 builds succeed
