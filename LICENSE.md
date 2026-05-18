@@ -92,7 +92,7 @@ The build scripts and CI/CD configurations in this repository are licensed under
 ```
 MIT License
 
-Copyright (c) 2024 Contributors
+Copyright (c) 2024-2026 binmgr Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

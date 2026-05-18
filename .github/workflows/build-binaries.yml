@@ -13,9 +13,16 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: binmgr/ffmpeg
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   get-version:
@@ -35,7 +42,7 @@ jobs:
           if [ -n "${{ github.event.inputs.ffmpeg_version }}" ]; then
             VERSION="${{ github.event.inputs.ffmpeg_version }}"
           else
-            VERSION=$(curl -s https://ffmpeg.org/releases/ | grep -oP 'ffmpeg-\K[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V | tail -1)
+            VERSION=$(curl -q -LSsf https://ffmpeg.org/releases/ | grep -oP 'ffmpeg-\K[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V | tail -1)
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT

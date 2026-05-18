@@ -1,0 +1,72 @@
+name: Security
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret scan (truffleHog)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Run truffleHog
+        uses: trufflesecurity/trufflehog@37b77001d0174ebec2fcca2bd83ff83a6d45a3ab # v3.95.3
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+  workflow-policy:
+    name: Workflow action pinning policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Verify all `uses:` lines are pinned to a 40-char SHA
+        run: |
+          set -euo pipefail
+          fail=0
+          # Match lines like `uses: owner/action@ref` outside of comments
+          while IFS= read -r line; do
+            ref="${line##*@}"
+            # Strip inline trailing comment if any
+            ref="${ref%% *}"
+            ref="${ref%%#*}"
+            ref="${ref%%	*}"
+            # Local reusable workflow refs start with ./ — allowed
+            case "${line}" in
+              *"uses: ./"*) continue ;;
+            esac
+            # docker:// URIs are allowed unpinned (image digest is the pin)
+            case "${line}" in
+              *"uses: docker://"*) continue ;;
+            esac
+            if [ "${#ref}" -ne 40 ] || ! printf '%s' "${ref}" | grep -qE '^[0-9a-f]{40}$'; then
+              echo "::error file=${file}::Action not pinned to 40-char SHA: ${line}"
+              fail=1
+            fi
+          done < <(grep -rEn '^\s*-?\s*uses:\s+\S+' .github/workflows .gitea/workflows .forgejo/workflows 2>/dev/null | grep -v '^\s*#')
+          exit "${fail}"
+
+      - name: Block pull_request_target with code execution
+        run: |
+          if grep -rEn '^\s*-?\s*pull_request_target' .github/workflows .gitea/workflows .forgejo/workflows 2>/dev/null; then
+            echo "::error::pull_request_target detected — forbidden because it runs with secrets."
+            exit 1
+          fi

@@ -3,6 +3,7 @@ variables:
 
 stages:
   - version
+  - security
   - build
   - release
 
@@ -21,13 +22,21 @@ get-version:
       if [ -n "${FFMPEG_VERSION_OVERRIDE}" ]; then
         VERSION="${FFMPEG_VERSION_OVERRIDE}"
       else
-        VERSION=$(curl -s https://ffmpeg.org/releases/ | grep -oP 'ffmpeg-\K[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V | tail -1)
+        VERSION=$(curl -q -LSsf https://ffmpeg.org/releases/ | grep -oP 'ffmpeg-\K[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V | tail -1)
       fi
       echo "FFMPEG_VERSION=${VERSION}" > version.env
       echo "FFMPEG_TAG=v${VERSION}" >> version.env
   artifacts:
     reports:
       dotenv: version.env
+
+secret-scan:
+  stage: security
+  image: trufflesecurity/trufflehog:latest
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - trufflehog git file://. --since-commit HEAD~1 --fail --only-verified
 
 .build:
   stage: build
@@ -65,14 +74,14 @@ get-version:
           apt-get install -y clang libxml2-dev llvm-dev uuid-dev
           git clone --depth 1 https://github.com/tpoechtrager/osxcross.git && cd osxcross
           wget -q https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
-          UNATTENDED=1 ./build.sh || true && export PATH="$PWD/target/bin:$PATH" && cd ..
+          UNATTENDED=1 ./build.sh && export PATH="$PWD/target/bin:$PATH" && cd ..
           export CC=x86_64-apple-darwin23-clang CXX=x86_64-apple-darwin23-clang++ CROSS_PREFIX=x86_64-apple-darwin23-
           ;;
         darwin-arm64)
           apt-get install -y clang libxml2-dev llvm-dev uuid-dev
           git clone --depth 1 https://github.com/tpoechtrager/osxcross.git && cd osxcross
           wget -q https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz -O tarballs/MacOSX14.0.sdk.tar.xz
-          UNATTENDED=1 ./build.sh || true && export PATH="$PWD/target/bin:$PATH" && cd ..
+          UNATTENDED=1 ./build.sh && export PATH="$PWD/target/bin:$PATH" && cd ..
           export CC=aarch64-apple-darwin23-clang CXX=aarch64-apple-darwin23-clang++ CROSS_PREFIX=aarch64-apple-darwin23-
           ;;
         freebsd-*)
@@ -188,17 +197,17 @@ release:
       echo "]" >> metadata.json
 
       # Delete existing release
-      curl -sf -X DELETE -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+      curl -sf -X DELETE -H "JOB-TOKEN: ${CI_JOB_TOKEN}" \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${FFMPEG_TAG}" || true
-      curl -sf -X DELETE -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+      curl -sf -X DELETE -H "JOB-TOKEN: ${CI_JOB_TOKEN}" \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/tags/${FFMPEG_TAG}" || true
 
       # Create tag and release
-      curl -sf -X POST -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+      curl -sf -X POST -H "JOB-TOKEN: ${CI_JOB_TOKEN}" \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/tags" \
         -d "tag_name=${FFMPEG_TAG}&ref=${CI_COMMIT_SHA}" || true
 
-      RELEASE_ID=$(curl -sf -X POST -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+      RELEASE_ID=$(curl -sf -X POST -H "JOB-TOKEN: ${CI_JOB_TOKEN}" \
         -H "Content-Type: application/json" \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases" \
         -d "{\"tag_name\":\"${FFMPEG_TAG}\",\"name\":\"FFmpeg ${FFMPEG_VERSION}\",\"description\":\"FFmpeg ${FFMPEG_VERSION} static builds\"}" \
@@ -207,9 +216,9 @@ release:
       # Upload assets
       for file in ffmpeg-* checksums.txt metadata.json; do
         [ -f "$file" ] || continue
-        UPLOAD=$(curl -sf -X POST -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+        UPLOAD=$(curl -sf -X POST -H "JOB-TOKEN: ${CI_JOB_TOKEN}" \
           -F "file=@${file}" "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/uploads" | jq -r '.full_path')
-        curl -sf -X POST -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+        curl -sf -X POST -H "JOB-TOKEN: ${CI_JOB_TOKEN}" \
           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${FFMPEG_TAG}/assets/links" \
           -d "name=${file}&url=${CI_SERVER_URL}/${CI_PROJECT_PATH}${UPLOAD}"
       done

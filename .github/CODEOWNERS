@@ -1,0 +1,13 @@
+# Global owners — review required for everything not covered below
+* @binmgr
+
+# Workflow changes require maintainer sign-off
+.github/ @binmgr
+.gitea/ @binmgr
+.forgejo/ @binmgr
+.gitlab-ci.yml @binmgr
+Jenkinsfile @binmgr
+
+# Security-sensitive files
+.github/SECURITY.md @binmgr
+docker/ @binmgr

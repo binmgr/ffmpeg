@@ -10,14 +10,22 @@ on:
     - cron: '0 0 1 */3 *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: binmgr/ffmpeg
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       packages: write
 
     steps:

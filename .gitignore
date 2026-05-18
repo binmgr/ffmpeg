@@ -5,6 +5,16 @@ ignoredirmessage
 # ignore .build_failed files
 **/.build_failed*
 
+# ignore dotenv files
+.env
+app.env
+default.env
+
+# ignore log and temp files
+*.log
+*.tmp
+*.temp
+
 # OS generated files
 ### Linux ###
 *~
