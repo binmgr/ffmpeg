@@ -102,3 +102,6 @@ $RECYCLE.BIN/
 **/*.rewrite.sh
 **/*.refactor.sh
 
+# Claude Code local settings and session data
+.claude/
+

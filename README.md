@@ -235,7 +235,7 @@ docker run --rm -v "$PWD/output:/output" ghcr.io/binmgr/ffmpeg:build \
 act -j build
 ```
 
-See [ACT_USAGE.md](ACT_USAGE.md) for full local CI usage and [ARCHITECTURE.md](ARCHITECTURE.md) for a deep-dive on the cross-compile setup.
+The `.actrc` at the repo root pre-configures the runner image. See the [act docs](https://github.com/nektos/act) for full usage.
 
 ---
 
