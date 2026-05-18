@@ -112,6 +112,7 @@ $RECYCLE.BIN/
 **/*.rewrite.sh
 **/*.refactor.sh
 
-# Claude Code local settings and session data
-.claude/
+# Claude Code — local-only files (settings.json is team config and IS committed)
+.claude/settings.local.json
+.claude/plans/
 

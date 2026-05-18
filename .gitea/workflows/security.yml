@@ -70,3 +70,45 @@ jobs:
             echo "::error::pull_request_target detected — forbidden because it runs with secrets."
             exit 1
           fi
+
+  image-scan:
+    name: Image scan (Trivy)
+    runs-on: ubuntu-latest
+    env:
+      TRIVY_VERSION: '0.60.0'
+      REGISTRY: ghcr.io
+      IMAGE_NAME: binmgr/ffmpeg
+    steps:
+      - name: Install Trivy
+        run: |
+          wget -q "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.deb"
+          sudo dpkg -i "trivy_${TRIVY_VERSION}_Linux-64bit.deb"
+
+      - name: Login to registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan build image (informational)
+        run: |
+          # Build image contains many tools; failures are informational only
+          trivy image \
+            --exit-code 0 \
+            --severity CRITICAL,HIGH \
+            --no-progress \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:build"
+
+      - name: Scan runtime image
+        run: |
+          # Runtime image is the distributed artifact — fail on CRITICAL/HIGH CVEs
+          if docker pull "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" 2>/dev/null; then
+            trivy image \
+              --exit-code 1 \
+              --severity CRITICAL,HIGH \
+              --no-progress \
+              "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          else
+            echo "Runtime image not yet published — skipping scan"
+          fi

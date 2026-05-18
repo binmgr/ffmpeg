@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git pull*)",
+      "Bash(git stash*)",
+      "Bash(act --list*)",
+      "Bash(gitcommit*)"
+    ]
+  }
+}

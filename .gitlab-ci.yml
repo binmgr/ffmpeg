@@ -38,6 +38,40 @@ secret-scan:
   script:
     - trufflehog git file://. --since-commit HEAD~1 --fail --only-verified
 
+image-scan:
+  stage: security
+  image: alpine:latest
+  variables:
+    TRIVY_VERSION: '0.60.0'
+    REGISTRY: ghcr.io
+    IMAGE_NAME: binmgr/ffmpeg
+    # trivy reads these for registry auth
+    TRIVY_USERNAME: $CI_REGISTRY_USER
+    TRIVY_PASSWORD: $CI_JOB_TOKEN
+  script:
+    - apk add --no-cache wget
+    - wget -q "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+    - tar xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
+    - chmod +x ./trivy
+    - |
+      # Build image — informational only (contains many tools)
+      ./trivy image \
+        --exit-code 0 \
+        --severity CRITICAL,HIGH \
+        --no-progress \
+        "${REGISTRY}/${IMAGE_NAME}:build"
+    - |
+      # Runtime image — fail on CRITICAL/HIGH CVEs
+      if ./trivy image --exit-code 0 --severity LOW "${REGISTRY}/${IMAGE_NAME}:latest" > /dev/null 2>&1; then
+        ./trivy image \
+          --exit-code 1 \
+          --severity CRITICAL,HIGH \
+          --no-progress \
+          "${REGISTRY}/${IMAGE_NAME}:latest"
+      else
+        echo "Runtime image not yet published — skipping scan"
+      fi
+
 .build:
   stage: build
   image: ubuntu:22.04
