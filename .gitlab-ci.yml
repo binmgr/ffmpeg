@@ -42,7 +42,7 @@ image-scan:
   stage: security
   image: alpine:latest
   variables:
-    TRIVY_VERSION: '0.60.0'
+    TRIVY_VERSION: '0.70.0'
     REGISTRY: ghcr.io
     IMAGE_NAME: binmgr/ffmpeg
     # trivy reads these for registry auth
