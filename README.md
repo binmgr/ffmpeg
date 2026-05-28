@@ -177,7 +177,7 @@ docker/Dockerfile.build  →  ghcr.io/binmgr/ffmpeg:build  (Alpine build env)
 
 **Build environment:** All 7 non-Windows-ARM64 targets build inside `ghcr.io/binmgr/ffmpeg:build` — an Alpine-based Docker image with cross-compile toolchains for every target pre-installed. Windows-ARM64 uses `ubuntu-latest` because `llvm-mingw` is a glibc binary that crashes on Alpine/musl.
 
-**Multi-provider CI:** The repository ships CI configs for four providers. Each builds all 8 targets independently:
+**Multi-provider CI:** The repository ships CI configs for five providers. Each builds all 8 targets independently:
 - **GitHub Actions** (`.github/workflows/`) — primary; publishes GitHub Releases and `ghcr.io` Docker image
 - **Gitea** (`.gitea/workflows/`) — act-runner compatible workflow syntax; triggers on push and monthly schedule
 - **Forgejo** (`.forgejo/workflows/`) — same content as Gitea (act-runner compatible)
@@ -197,15 +197,26 @@ docker/Dockerfile.build  →  ghcr.io/binmgr/ffmpeg:build  (Alpine build env)
 ```
 .
 ├── .github/
+│   ├── CODEOWNERS
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.md
+│   │   └── feature_request.md
+│   ├── SECURITY.md
+│   ├── pull_request_template.md
 │   └── workflows/
 │       ├── build-env-image.yml   # builds ghcr.io/binmgr/ffmpeg:build (quarterly)
-│       └── build-binaries.yml    # builds all 8 targets + GitHub release (monthly)
+│       ├── build-binaries.yml    # builds all 8 targets + GitHub release (monthly)
+│       └── security.yml          # secret scan, action pinning policy, image scan (weekly)
 ├── .gitea/
 │   └── workflows/
 │       ├── build-env-image.yml   # Gitea: build environment image
-│       └── build-binaries.yml    # Gitea: build all 8 targets
+│       ├── build-binaries.yml    # Gitea: build all 8 targets
+│       └── security.yml          # Gitea: secret scan, action pinning, image scan
 ├── .forgejo/
-│   └── workflows/                # Forgejo: same content as .gitea/workflows/
+│   └── workflows/
+│       ├── build-env-image.yml   # Forgejo: build environment image
+│       ├── build-binaries.yml    # Forgejo: build all 8 targets
+│       └── security.yml          # Forgejo: secret scan, action pinning, image scan
 ├── docker/
 │   ├── Dockerfile                # Runtime image (FROM scratch, ffmpeg + ffprobe)
 │   └── Dockerfile.build          # Alpine build environment + build-ffmpeg script

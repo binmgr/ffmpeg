@@ -100,9 +100,9 @@ image-scan:
           export CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CROSS_PREFIX=x86_64-w64-mingw32-
           ;;
         windows-arm64)
-          wget -q https://github.com/mstorsjo/llvm-mingw/releases/download/20241217/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64.tar.xz
-          tar xJf llvm-mingw-*.tar.xz && export PATH="$PWD/llvm-mingw-20241217-ucrt-ubuntu-20.04-x86_64/bin:$PATH"
-          export CC=aarch64-w64-mingw32-gcc CXX=aarch64-w64-mingw32-g++ CROSS_PREFIX=aarch64-w64-mingw32-
+          wget -q https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar xJf llvm-mingw-*.tar.xz && export PATH="$PWD/llvm-mingw-20260505-ucrt-ubuntu-22.04-x86_64/bin:$PATH"
+          export CC=aarch64-w64-mingw32-clang CXX=aarch64-w64-mingw32-clang++ CROSS_PREFIX=aarch64-w64-mingw32-
           ;;
         darwin-amd64)
           apt-get install -y clang libxml2-dev llvm-dev uuid-dev
