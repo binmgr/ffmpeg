@@ -1016,7 +1016,7 @@ esac
 
 if [ -z "$FFMPEG_VERSION" ]; then
     FFMPEG_VERSION=$(
-        wget -qO- https://ffmpeg.org/releases/ |
+        wget -qO- --tries=5 --waitretry=15 --retry-connrefused --timeout=60 https://ffmpeg.org/releases/ |
             grep -oE 'ffmpeg-[0-9]+\.[0-9]+(\.[0-9]+)?' |
             sed 's/ffmpeg-//' |
             sort -V |
@@ -1032,7 +1032,7 @@ fi
 
 cd /build
 rm -rf "ffmpeg-${FFMPEG_VERSION}" "ffmpeg-${FFMPEG_VERSION}.tar.xz"
-wget -q "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
+wget -nv --tries=5 --waitretry=15 --retry-connrefused --timeout=60 "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
 tar xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"
 cd "ffmpeg-${FFMPEG_VERSION}"
 
