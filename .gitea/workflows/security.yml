@@ -98,7 +98,8 @@ jobs:
             --exit-code 0 \
             --severity CRITICAL,HIGH \
             --no-progress \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:build"
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:build" \
+            || echo "Build image not published yet — skipping informational scan"
 
       - name: Scan runtime image
         run: |
