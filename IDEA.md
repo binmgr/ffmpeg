@@ -15,7 +15,7 @@ supported_platforms: linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, windo
 ## Business logic
 
 **Must have:**
-- Static FFmpeg binaries for all eight targets with no runtime shared-library dependencies
+- Static FFmpeg binaries for all eight targets with no third-party runtime shared-library dependencies (macOS links only the system libSystem)
 - Per-platform tar.gz archives (unix) and zip archives (windows) containing ffmpeg + ffprobe (+ ffplay where built)
 - SHA-256 checksum file (`SHA256SUMS.txt`) covering every release asset
 - Docker runtime image (`ghcr.io/binmgr/ffmpeg:latest`) for linux/amd64 and linux/arm64

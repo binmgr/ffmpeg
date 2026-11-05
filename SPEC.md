@@ -5,18 +5,13 @@ Only rules that actively differ from the defaults are listed here.
 
 ---
 
-## Exception 1 — Gitea/GitLab CI uses per-job toolchain setup
+## Exception 1 — Gitea/Forgejo/GitLab/Jenkins builds pull-or-build the build image
 
-**Default rule:** CI binary builds run inside `ghcr.io/binmgr/ffmpeg:build` (pre-baked Alpine
-image with all cross-compile toolchains pre-installed).
+**Default rule:** CI binary builds run inside `ghcr.io/binmgr/ffmpeg:build`.
 
-**Override:** The `.gitea/workflows/build-binaries.yml` and `.gitlab-ci.yml` pipelines install the
-build toolchain (LLVM, osxcross, MinGW, musl cross-compilers) fresh in each job on `ubuntu-latest`
-instead of using the pre-baked container image.
+**Override:** The Gitea, Forgejo, and GitLab pipelines run `docker pull ghcr.io/binmgr/ffmpeg:build` and, if that fails, build `docker/Dockerfile.build` locally as `local/ffmpeg:build`, then call `build-ffmpeg` inside it. The `windows-arm64` target is built inline on an Ubuntu runner on every provider because `llvm-mingw` is a glibc binary that crashes on the Alpine build image.
 
-**Rationale:** Gitea/GitLab CI is often run on self-hosted runners that may not have access to
-`ghcr.io`. Installing the toolchain inline keeps those pipelines runnable without registry access or
-pre-pulled images — important for air-gapped or self-hosted deployments.
+**Rationale:** Self-hosted runners may not reach `ghcr.io`. Falling back to a local image build keeps those pipelines runnable without registry access, at the cost of a long first run, and guarantees every provider produces the same binaries.
 
 ---
 
@@ -50,12 +45,11 @@ release gate would add no new signal.
 
 ---
 
-## Exception 4 — No AI.md language template
+## Exception 4 — No language template in AI.md
 
 **Default rule:** Projects copy the Go or Rust `AI.md` template at setup.
 
-**Override:** This is a CI/distribution project — no Go, Rust, Node, or Python source code is
-maintained in this repository. No language template applies. `AI.md` is omitted.
+**Override:** This is a CI/distribution project with no maintained Go, Rust, Node, or Python source. `AI.md` documents the build pipeline instead of a language template.
 
 ---
 
@@ -63,7 +57,7 @@ maintained in this repository. No language template applies. `AI.md` is omitted.
 
 **Default rule:** GitLab CI job images must be pinned by digest (`image: alpine@sha256:{digest}`).
 
-**Override:** `.gitlab-ci.yml` job images are currently pinned by tag only (e.g. `alpine:3`).
+**Override:** `.gitlab-ci.yml` job images are currently pinned by tag only (e.g. `alpine:3`, `docker:27`).
 Digest pinning requires a live Docker daemon to resolve digests and is deferred until a Renovate
 GitLab integration or a CI helper script is added.
 

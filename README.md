@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-GPL--2.0-blue)](LICENSE.md)
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-latest-orange)](https://ffmpeg.org)
 
-Fully static, multi-platform FFmpeg binaries — no dependencies, runs anywhere. Pre-built for Linux, macOS, Windows, and FreeBSD on both amd64 and arm64. Binaries are stripped and statically linked against musl libc (Linux) or cross-compiled natively (macOS, Windows, FreeBSD).
+Static, multi-platform FFmpeg binaries with all codec libraries compiled in. Pre-built for Linux, macOS, Windows, and FreeBSD on both amd64 and arm64. Binaries are stripped; Linux (musl), Windows, and FreeBSD are fully static, and macOS links only the system libSystem.
 
 ---
 
@@ -102,7 +102,7 @@ Tags: `latest`, `{ffmpeg-version}` (e.g. `8.1.1`), `YYMM` (e.g. `2505`)
 └──────────┴─────────┴─────────┴─────────┴─────────┘
 ```
 
-All binaries are **fully statically linked** — no libc, no system libraries required at runtime.
+Linux, Windows, and FreeBSD binaries are **fully statically linked** — no system libraries required at runtime. macOS binaries link only the system libSystem (macOS does not support static libc linking).
 
 ---
 
@@ -179,10 +179,10 @@ docker/Dockerfile.build  →  ghcr.io/binmgr/ffmpeg:build  (Alpine build env)
 
 **Multi-provider CI:** The repository ships CI configs for five providers. Each builds all 8 targets independently:
 - **GitHub Actions** (`.github/workflows/`) — primary; publishes GitHub Releases and `ghcr.io` Docker image
-- **Gitea** (`.gitea/workflows/`) — act-runner compatible workflow syntax; triggers on push and monthly schedule
-- **Forgejo** (`.forgejo/workflows/`) — same content as Gitea (act-runner compatible)
-- **GitLab CI** (`.gitlab-ci.yml`) — publishes GitLab Releases via the GitLab API
-- **Jenkins** (`Jenkinsfile`) — declarative pipeline as the escape-hatch runner
+- **Gitea** (`.gitea/workflows/`) — act-runner compatible; pulls `:build` (or builds it locally when the registry is unreachable) and releases via the Gitea API
+- **Forgejo** (`.forgejo/workflows/`) — same content as Gitea
+- **GitLab CI** (`.gitlab-ci.yml`) — docker-in-docker, same pull-or-build image; publishes GitLab Releases via the GitLab API
+- **Jenkins** (`Jenkinsfile`) — declarative verification pipeline (builds and archives; no release)
 
 **Build triggers:**
 - `docker/Dockerfile.build` or `build-env-image.yml` changed → rebuild `:build` image → rebuild binaries
@@ -224,6 +224,10 @@ docker/Dockerfile.build  →  ghcr.io/binmgr/ffmpeg:build  (Alpine build env)
 ├── Jenkinsfile                   # Jenkins declarative pipeline
 ├── renovate.json                 # Renovate dependency updates config
 ├── .actrc                        # act (local CI runner) configuration
+├── AI.md                         # Implementation spec
+├── IDEA.md                       # Project plan
+├── SPEC.md                       # Project-specific rule overrides
+├── Makefile                      # build-env, build, validate, test, clean
 ├── LICENSE.md
 └── README.md
 ```
@@ -237,16 +241,15 @@ The build is entirely CI-driven. There is no local toolchain requirement — all
 **Run a single target locally:**
 
 ```bash
-docker pull ghcr.io/binmgr/ffmpeg:build
-docker run --rm -v "$PWD/output:/output" ghcr.io/binmgr/ffmpeg:build \
-  build-ffmpeg linux-amd64
+make build-env                      # or: docker pull ghcr.io/binmgr/ffmpeg:build
+make build TARGET=linux-amd64       # output lands in ./output
 ```
 
 **Run the full CI pipeline locally with `act`:**
 
 ```bash
 # Requires: act (https://github.com/nektos/act)
-act -j build
+act -j build -W .github/workflows/build-binaries.yml
 ```
 
 The `.actrc` at the repo root pre-configures the runner image. See the [act docs](https://github.com/nektos/act) for full usage.
