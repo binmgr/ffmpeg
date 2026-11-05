@@ -242,7 +242,8 @@ The build is entirely CI-driven. There is no local toolchain requirement — all
 
 ```bash
 make build-env                      # or: docker pull ghcr.io/binmgr/ffmpeg:build
-make build TARGET=linux-amd64       # output lands in ./output
+make build TARGET=linux-amd64       # output lands in ./output (latest FFmpeg)
+make build TARGET=linux-amd64 VERSION=8.1.1   # pin a specific version
 ```
 
 **Run the full CI pipeline locally with `act`:**
